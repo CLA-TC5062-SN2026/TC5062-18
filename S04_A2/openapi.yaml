@@ -1,0 +1,5307 @@
+# ==========================================================================
+# TiendiNet - Contrato OpenAPI 3.0 (spec-first)  |  S04-A2
+# Fuente: SRS_equipo.md v2.0, diagrama de clases y componentes (S04-A1)
+# x-acceptance-criteria: criterios RF-XX-AC-Y que satisface cada operación
+# x-roles: roles autorizados (PUBLICO = sin sesión; MERCADO_PAGO = firma)
+# Correcciones respecto al borrador del agente: ver revision_rest.md
+# ==========================================================================
+openapi: 3.0.3
+info:
+  title: TiendiNet API
+  version: 1.0.0
+  description: 'Contrato REST del MVP de TiendiNet (spec-first). Fuente de verdad para el backend FastAPI (S05-S06)
+    y las pruebas automatizadas (S09).
+
+
+    **Convenciones**
+
+    - Recursos en español, plural, minúsculas y kebab-case; sin verbos en las rutas.
+
+    - Cada operación declara `x-acceptance-criteria` (IDs `RF-XX-AC-Y` del SRS v2.0) y `x-roles` (matriz de permisos
+    SRS §3.4).
+
+    - Errores en `application/problem+json` (RFC 7807) con un `codigo` estable; `detail` lleva el mensaje del SRS.
+
+    - 400 = JSON mal formado; 422 = regla de negocio o validación; 409 = choca con el estado actual (existencias,
+    transiciones, duplicados).
+
+    - Colecciones paginadas con `page` y `pageSize` y respuesta `{datos, paginacion}`.
+
+    - Las operaciones no idempotentes críticas exigen el encabezado `Idempotency-Key`.
+
+    - Fechas y horas en ISO 8601 UTC; la lógica de negocio usa America/Mexico_City.
+
+    - Importes en MXN con IVA y 2 decimales.'
+  contact:
+    name: Equipo TiendiNet
+  license:
+    name: Uso académico
+    url: https://creativecommons.org/licenses/by-nc/4.0/
+servers:
+- url: http://localhost:8000/api/v1
+  description: Docker Compose local
+- url: https://{dominio}/api/v1
+  description: Piloto expuesto por túnel HTTPS
+  variables:
+    dominio:
+      default: tiendinet.trycloudflare.com
+security:
+- bearerAuth: []
+tags:
+- name: Autenticación
+  description: Sesión, registro de clientes y recuperación de contraseña (RF-01, RF-02)
+- name: Usuarios
+  description: Cuentas de la tienda (RF-03)
+- name: Productos
+  description: Catálogo interno y categorías (RF-04, RF-15)
+- name: Inventario
+  description: Lotes, recepciones, ajustes, caducidades, PR y alertas (RF-05 a RF-09)
+- name: Proveedores
+  description: Sincronización, ofertas, comparación, sugerencia y propuesta (RF-10 a RF-14)
+- name: Ventas
+  description: Punto de venta, comprobante, cancelación, diferidas y corte (RF-16 a RF-20)
+- name: Tienda en línea
+  description: Catálogo público y carrito (RF-21, RF-22)
+- name: Pedidos
+  description: Pedidos anticipados, estados y faltantes (RF-22, RF-24 a RF-26)
+- name: Pagos
+  description: Pagos, webhook de Mercado Pago y reembolsos (RF-23, RF-27)
+- name: Administración
+  description: Configuración y procesos programados (RF-28)
+- name: Reportes
+  description: Reportes e indicadores (RF-29)
+paths:
+  /sesiones:
+    post:
+      tags:
+      - Autenticación
+      summary: Iniciar sesión con correo y contraseña
+      operationId: iniciarSesion
+      description: Emite un JWT con el rol del usuario (60 min tienda, 24 h cliente; RNF-04). Responde 200 y no
+        201 porque el token no es un recurso consultable por URI. Tras 5 fallos consecutivos de la combinación correo
+        + IP responde 429 durante 15 min.
+      security: []
+      x-roles:
+      - PUBLICO
+      x-acceptance-criteria:
+      - RF-01-AC-1
+      - RF-01-AC-2
+      - RF-01-AC-5
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SesionCrear'
+      responses:
+        '200':
+          description: Sesión iniciada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sesion'
+        '400':
+          $ref: '#/components/responses/SolicitudMalFormada'
+        '401':
+          $ref: '#/components/responses/CredencialesInvalidas'
+        '422':
+          $ref: '#/components/responses/ErrorValidacion'
+        '429':
+          $ref: '#/components/responses/DemasiadosIntentos'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /clientes:
+    post:
+      tags:
+      - Autenticación
+      summary: Registrar una cuenta de cliente
+      operationId: registrarCliente
+      description: Registrar una cuenta de cliente.
+      security: []
+      x-roles:
+      - PUBLICO
+      x-acceptance-criteria:
+      - RF-02-AC-1
+      - RF-02-AC-2
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClienteCrear'
+      responses:
+        '201':
+          description: Cuenta creada con rol CLIENTE
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Usuario'
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+        '400':
+          $ref: '#/components/responses/SolicitudMalFormada'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '422':
+          $ref: '#/components/responses/ErrorValidacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /solicitudes-recuperacion:
+    post:
+      tags:
+      - Autenticación
+      summary: Solicitar enlace para recuperar la contraseña
+      operationId: solicitarRecuperacion
+      description: Siempre responde 202, exista o no el correo, para no revelar cuentas registradas. El enlace vence
+        a los 30 minutos y es de un solo uso.
+      security: []
+      x-roles:
+      - PUBLICO
+      x-acceptance-criteria:
+      - RF-02-AC-3
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SolicitudRecuperacion'
+      responses:
+        '202':
+          description: Solicitud aceptada; si el correo existe, se envía el enlace
+        '400':
+          $ref: '#/components/responses/SolicitudMalFormada'
+        '422':
+          $ref: '#/components/responses/ErrorValidacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /restablecimientos-contrasena:
+    post:
+      tags:
+      - Autenticación
+      summary: Definir contraseña con el token de un enlace (recuperación o activación)
+      operationId: restablecerContrasena
+      description: Consume el token de un solo uso enviado por correo. Sirve también para activar cuentas de la
+        tienda creadas por el Dueño (RF-03-AC-1).
+      security: []
+      x-roles:
+      - PUBLICO
+      x-acceptance-criteria:
+      - RF-02-AC-3
+      - RF-03-AC-1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RestablecimientoContrasena'
+      responses:
+        '204':
+          description: Contraseña definida
+        '400':
+          $ref: '#/components/responses/SolicitudMalFormada'
+        '410':
+          $ref: '#/components/responses/EnlaceExpirado'
+        '422':
+          $ref: '#/components/responses/ErrorValidacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /usuarios/me:
+    get:
+      tags:
+      - Usuarios
+      summary: Consultar el usuario autenticado
+      operationId: consultarUsuarioActual
+      description: Consultar el usuario autenticado.
+      x-roles:
+      - DUENO
+      - EMPLEADO
+      - CLIENTE
+      x-acceptance-criteria:
+      - RF-01-AC-1
+      responses:
+        '200':
+          description: Usuario autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Usuario'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /usuarios:
+    get:
+      tags:
+      - Usuarios
+      summary: Listar usuarios de la tienda
+      operationId: listarUsuarios
+      description: Listar usuarios de la tienda.
+      x-roles:
+      - DUENO
+      x-acceptance-criteria:
+      - RF-03-AC-1
+      parameters:
+      - $ref: '#/components/parameters/Pagina'
+      - $ref: '#/components/parameters/TamanoPagina'
+      - name: rol
+        in: query
+        schema:
+          $ref: '#/components/schemas/Rol'
+      - name: activo
+        in: query
+        schema:
+          type: boolean
+      responses:
+        '200':
+          description: Página de usuarios
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginaUsuario'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    post:
+      tags:
+      - Usuarios
+      summary: Crear cuenta de Dueño o Empleado
+      operationId: crearUsuario
+      description: La cuenta nace activa sin contraseña; se envía un correo de activación que se consume en POST
+        /restablecimientos-contrasena.
+      x-roles:
+      - DUENO
+      x-acceptance-criteria:
+      - RF-03-AC-1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UsuarioCrear'
+      responses:
+        '201':
+          description: Usuario creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Usuario'
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+        '400':
+          $ref: '#/components/responses/SolicitudMalFormada'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '422':
+          $ref: '#/components/responses/ErrorValidacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /usuarios/{usuarioId}:
+    get:
+      tags:
+      - Usuarios
+      summary: Consultar un usuario
+      operationId: consultarUsuario
+      description: Consultar un usuario.
+      x-roles:
+      - DUENO
+      x-acceptance-criteria:
+      - RF-03-AC-1
+      parameters:
+      - $ref: '#/components/parameters/UsuarioId'
+      responses:
+        '200':
+          description: Usuario
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Usuario'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    patch:
+      tags:
+      - Usuarios
+      summary: Cambiar nombre, rol o estado (activar/desactivar) de un usuario
+      operationId: actualizarUsuario
+      description: 'Desactivar invalida de inmediato los JWT vigentes: la API valida en cada petición que la cuenta
+        siga activa y responde 401 (RF-03-AC-2, RNF-04). Siempre debe quedar al menos un Dueño activo (409).'
+      x-roles:
+      - DUENO
+      x-acceptance-criteria:
+      - RF-03-AC-2
+      - RF-03-AC-3
+      parameters:
+      - $ref: '#/components/parameters/UsuarioId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UsuarioActualizar'
+      responses:
+        '200':
+          description: Usuario actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Usuario'
+        '400':
+          $ref: '#/components/responses/SolicitudMalFormada'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '422':
+          $ref: '#/components/responses/ErrorValidacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /categorias:
+    get:
+      tags:
+      - Productos
+      summary: Listar categorías
+      operationId: listarCategorias
+      description: Listar categorías.
+      security: []
+      x-roles:
+      - PUBLICO
+      x-acceptance-criteria:
+      - RF-21-AC-1
+      responses:
+        '200':
+          description: Categorías
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Categoria'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    post:
+      tags:
+      - Productos
+      summary: Crear categoría
+      operationId: crearCategoria
+      description: Crear categoría.
+      x-roles:
+      - DUENO
+      x-acceptance-criteria:
+      - RF-04-AC-1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CategoriaCrear'
+      responses:
+        '201':
+          description: Categoría creada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Categoria'
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+        '400':
+          $ref: '#/components/responses/SolicitudMalFormada'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '422':
+          $ref: '#/components/responses/ErrorValidacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /productos:
+    get:
+      tags:
+      - Productos
+      summary: Buscar y listar productos (POS y administración)
+      operationId: listarProductos
+      description: 'Búsqueda del POS por coincidencia parcial de nombre sin distinguir mayúsculas ni acentos (`q`)
+        o por código de barras exacto (`codigoBarras`). Sin coincidencias responde 200 con `datos` vacío; la interfaz
+        muestra "Producto no encontrado". Nunca incluye costos (RD-06): esos están en /productos/{productoId}/costo.'
+      x-roles:
+      - DUENO
+      - EMPLEADO
+      x-acceptance-criteria:
+      - RF-15-AC-1
+      - RF-15-AC-2
+      - RF-15-AC-3
+      - RF-04-AC-1
+      - RF-04-AC-5
+      parameters:
+      - $ref: '#/components/parameters/Pagina'
+      - $ref: '#/components/parameters/TamanoPagina'
+      - name: q
+        in: query
+        schema:
+          type: string
+          minLength: 2
+      - name: codigoBarras
+        in: query
+        schema:
+          type: string
+          pattern: ^[0-9]{8,14}$
+      - name: categoriaId
+        in: query
+        schema:
+          type: integer
+      - name: activo
+        in: query
+        schema:
+          type: boolean
+          default: true
+      - name: bajoPuntoReorden
+        in: query
+        schema:
+          type: boolean
+        description: Solo productos con disponible ≤ PR.
+      responses:
+        '200':
+          description: Página de productos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginaProducto'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    post:
+      tags:
+      - Productos
+      summary: Dar de alta un producto
+      operationId: crearProducto
+      description: Dar de alta un producto.
+      x-roles:
+      - DUENO
+      x-acceptance-criteria:
+      - RF-04-AC-1
+      - RF-04-AC-2
+      - RF-04-AC-3
+      - RF-04-AC-4
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductoCrear'
+      responses:
+        '201':
+          description: Producto activo con existencia 0
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Producto'
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+        '400':
+          $ref: '#/components/responses/SolicitudMalFormada'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '422':
+          $ref: '#/components/responses/ErrorValidacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /productos/{productoId}:
+    get:
+      tags:
+      - Productos
+      summary: Consultar un producto
+      operationId: consultarProducto
+      description: Consultar un producto.
+      x-roles:
+      - DUENO
+      - EMPLEADO
+      x-acceptance-criteria:
+      - RF-04-AC-5
+      parameters:
+      - $ref: '#/components/parameters/ProductoId'
+      responses:
+        '200':
+          description: Producto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Producto'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    patch:
+      tags:
+      - Productos
+      summary: Editar datos, precio, proveedor preferido o desactivar un producto
+      operationId: actualizarProducto
+      description: 'Actualización parcial (JSON merge). `activo: false` desactiva el producto: deja de aparecer
+        en el POS y el catálogo, y su historial se conserva. No existe DELETE porque un producto con ventas no se
+        borra (RNF-14). Cambiar el proveedor preferido no altera el precio de venta.'
+      x-roles:
+      - DUENO
+      x-acceptance-criteria:
+      - RF-04-AC-4
+      - RF-04-AC-5
+      - RF-13-AC-4
+      - RF-01-AC-3
+      parameters:
+      - $ref: '#/components/parameters/ProductoId'
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: '#/components/schemas/ProductoActualizar'
+      responses:
+        '200':
+          description: Producto actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Producto'
+        '400':
+          $ref: '#/components/responses/SolicitudMalFormada'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '422':
+          $ref: '#/components/responses/ErrorValidacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /productos/{productoId}/costo:
+    get:
+      tags:
+      - Productos
+      summary: Consultar costo de referencia, último costo de lote y margen
+      operationId: consultarCostoProducto
+      description: Consultar costo de referencia, último costo de lote y margen.
+      x-roles:
+      - DUENO
+      x-acceptance-criteria:
+      - RF-01-AC-3
+      parameters:
+      - $ref: '#/components/parameters/ProductoId'
+      responses:
+        '200':
+          description: Costos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CostoProducto'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /productos/{productoId}/lotes:
+    get:
+      tags:
+      - Inventario
+      summary: Lotes del producto con cantidad y caducidad
+      operationId: listarLotesProducto
+      description: Lotes del producto con cantidad y caducidad.
+      x-roles:
+      - DUENO
+      - EMPLEADO
+      x-acceptance-criteria:
+      - RF-07-AC-1
+      parameters:
+      - $ref: '#/components/parameters/ProductoId'
+      - name: incluirAgotados
+        in: query
+        schema:
+          type: boolean
+          default: false
+      responses:
+        '200':
+          description: Lotes ordenados por caducidad (FEFO)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Lote'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /productos/{productoId}/punto-reorden:
+    get:
+      tags:
+      - Inventario
+      summary: Detalle del punto de reorden y su origen
+      operationId: consultarPuntoReorden
+      description: Detalle del punto de reorden y su origen.
+      x-roles:
+      - DUENO
+      x-acceptance-criteria:
+      - RF-08-AC-3
+      - RF-08-AC-4
+      - RF-08-AC-6
+      - RF-08-AC-7
+      parameters:
+      - $ref: '#/components/parameters/ProductoId'
+      responses:
+        '200':
+          description: Detalle del PR
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PuntoReorden'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    patch:
+      tags:
+      - Inventario
+      summary: Fijar PR inicial o PR manual con vigencia
+      operationId: actualizarPuntoReorden
+      description: Fijar PR inicial o PR manual con vigencia.
+      x-roles:
+      - DUENO
+      x-acceptance-criteria:
+      - RF-08-AC-1
+      - RF-08-AC-2
+      - RF-08-AC-5
+      - RF-01-AC-3
+      parameters:
+      - $ref: '#/components/parameters/ProductoId'
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: '#/components/schemas/PuntoReordenActualizar'
+      responses:
+        '200':
+          description: PR guardado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PuntoReorden'
+        '400':
+          $ref: '#/components/responses/SolicitudMalFormada'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '422':
+          $ref: '#/components/responses/ErrorValidacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /recepciones:
+    post:
+      tags:
+      - Inventario
+      summary: Registrar mercancía recibida (crea un lote)
+      operationId: registrarRecepcion
+      description: Si quien registra es Empleado, `costoUnitario` se ignora (RF-05-AC-3) y se toma el de la oferta
+        vigente; los proveedores de ruta pueden quedar sin costo. Resuelve la alerta de reorden si la disponible
+        supera el PR.
+      x-roles:
+      - DUENO
+      - EMPLEADO
+      x-acceptance-criteria:
+      - RF-05-AC-1
+      - RF-05-AC-2
+      - RF-05-AC-3
+      - RF-05-AC-4
+      - RF-09-AC-5
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecepcionCrear'
+      responses:
+        '201':
+          description: Lote creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Lote'
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+        '400':
+          $ref: '#/components/responses/SolicitudMalFormada'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '422':
+          $ref: '#/components/responses/ErrorValidacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /lotes:
+    get:
+      tags:
+      - Inventario
+      summary: Lotes por caducar o caducados
+      operationId: listarLotes
+      description: '`estadoCaducidad=POR_CADUCAR` usa los días de aviso configurados (por defecto 3). Un lote que
+        caduca hoy todavía se puede vender.'
+      x-roles:
+      - DUENO
+      - EMPLEADO
+      x-acceptance-criteria:
+      - RF-07-AC-2
+      - RF-07-AC-3
+      parameters:
+      - $ref: '#/components/parameters/Pagina'
+      - $ref: '#/components/parameters/TamanoPagina'
+      - name: estadoCaducidad
+        in: query
+        schema:
+          type: string
+          enum:
+          - VIGENTE
+          - POR_CADUCAR
+          - CADUCADO
+      - name: productoId
+        in: query
+        schema:
+          type: integer
+      - name: conExistencia
+        in: query
+        schema:
+          type: boolean
+          default: true
+      responses:
+        '200':
+          description: Página de lotes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginaLote'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /lotes/{loteId}:
+    get:
+      tags:
+      - Inventario
+      summary: Consultar un lote
+      operationId: consultarLote
+      description: Consultar un lote.
+      x-roles:
+      - DUENO
+      - EMPLEADO
+      x-acceptance-criteria:
+      - RF-05-AC-1
+      parameters:
+      - $ref: '#/components/parameters/LoteId'
+      responses:
+        '200':
+          description: Lote
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Lote'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /ajustes-inventario:
+    post:
+      tags:
+      - Inventario
+      summary: Registrar merma de un lote o conteo físico
+      operationId: registrarAjuste
+      description: 'MERMA descuenta del lote indicado y no cuenta en el CDP. CONTEO fija la existencia física: una
+        diferencia negativa se descuenta con FEFO y una positiva se suma al lote más reciente; además quita la marca
+        de descuadre.'
+      x-roles:
+      - DUENO
+      - EMPLEADO
+      x-acceptance-criteria:
+      - RF-06-AC-1
+      - RF-06-AC-2
+      - RF-06-AC-3
+      - RF-06-AC-4
+      - RF-07-AC-3
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AjusteCrear'
+      responses:
+        '201':
+          description: Ajuste registrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ajuste'
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+        '400':
+          $ref: '#/components/responses/SolicitudMalFormada'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '422':
+          $ref: '#/components/responses/ErrorValidacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /alertas:
+    get:
+      tags:
+      - Inventario
+      summary: Alertas de reorden y caducidad
+      operationId: listarAlertas
+      description: Una alerta por producto activa a la vez; su disponible se actualiza en lugar de duplicarse. `proveedorSugerido`
+        solo se llena para el Dueño.
+      x-roles:
+      - DUENO
+      - EMPLEADO
+      x-acceptance-criteria:
+      - RF-09-AC-1
+      - RF-09-AC-2
+      - RF-09-AC-3
+      - RF-09-AC-4
+      - RF-09-AC-5
+      parameters:
+      - $ref: '#/components/parameters/Pagina'
+      - $ref: '#/components/parameters/TamanoPagina'
+      - name: tipo
+        in: query
+        schema:
+          $ref: '#/components/schemas/TipoAlerta'
+      - name: estado
+        in: query
+        schema:
+          $ref: '#/components/schemas/EstadoAlerta'
+      responses:
+        '200':
+          description: Página de alertas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginaAlerta'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /proveedores:
+    get:
+      tags:
+      - Proveedores
+      summary: Listar proveedores
+      operationId: listarProveedores
+      description: El Empleado lo usa para elegir proveedor en una recepción.
+      x-roles:
+      - DUENO
+      - EMPLEADO
+      x-acceptance-criteria:
+      - RF-05-AC-4
+      parameters:
+      - name: tipo
+        in: query
+        schema:
+          $ref: '#/components/schemas/TipoProveedor'
+      responses:
+        '200':
+          description: Proveedores
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Proveedor'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    post:
+      tags:
+      - Proveedores
+      summary: Registrar proveedor manual o de ruta
+      operationId: crearProveedor
+      description: Registrar proveedor manual o de ruta.
+      x-roles:
+      - DUENO
+      x-acceptance-criteria:
+      - RF-11-AC-1
+      - RF-05-AC-4
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProveedorCrear'
+      responses:
+        '201':
+          description: Proveedor creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Proveedor'
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+        '400':
+          $ref: '#/components/responses/SolicitudMalFormada'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '422':
+          $ref: '#/components/responses/ErrorValidacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /sincronizaciones:
+    post:
+      tags:
+      - Proveedores
+      summary: Sincronizar bajo demanda las BD de los proveedores A y B
+      operationId: iniciarSincronizacion
+      description: 'Operación asíncrona: puede tardar hasta 60 s (RNF-03). Responde 202 con la URI del resumen.
+        Una sincronización en curso devuelve 409.'
+      x-roles:
+      - DUENO
+      x-acceptance-criteria:
+      - RF-10-AC-1
+      - RF-10-AC-2
+      - RF-10-AC-3
+      - RF-10-AC-5
+      responses:
+        '202':
+          description: Sincronización en curso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sincronizacion'
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    get:
+      tags:
+      - Proveedores
+      summary: Historial de sincronizaciones (incluye las de las 5:00)
+      operationId: listarSincronizaciones
+      description: Historial de sincronizaciones (incluye las de las 5:00).
+      x-roles:
+      - DUENO
+      x-acceptance-criteria:
+      - RF-10-AC-5
+      parameters:
+      - $ref: '#/components/parameters/Pagina'
+      - $ref: '#/components/parameters/TamanoPagina'
+      responses:
+        '200':
+          description: Página de sincronizaciones
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginaSincronizacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /sincronizaciones/{sincronizacionId}:
+    get:
+      tags:
+      - Proveedores
+      summary: Resumen de una sincronización (importadas, rechazos y errores por proveedor)
+      operationId: consultarSincronizacion
+      description: Resumen de una sincronización (importadas, rechazos y errores por proveedor).
+      x-roles:
+      - DUENO
+      x-acceptance-criteria:
+      - RF-10-AC-1
+      - RF-10-AC-2
+      - RF-10-AC-3
+      - RF-10-AC-5
+      parameters:
+      - $ref: '#/components/parameters/SincronizacionId'
+      responses:
+        '200':
+          description: Resumen
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sincronizacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /productos-por-vincular:
+    get:
+      tags:
+      - Proveedores
+      summary: Códigos de proveedor sin ficha de producto
+      operationId: listarProductosPorVincular
+      description: Códigos de proveedor sin ficha de producto.
+      x-roles:
+      - DUENO
+      x-acceptance-criteria:
+      - RF-10-AC-4
+      parameters:
+      - $ref: '#/components/parameters/Pagina'
+      - $ref: '#/components/parameters/TamanoPagina'
+      responses:
+        '200':
+          description: Página de productos por vincular
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginaProductoPorVincular'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /productos-por-vincular/{productoPorVincularId}/vinculacion:
+    post:
+      tags:
+      - Proveedores
+      summary: Asociar a una ficha existente o confirmar el alta de una nueva
+      operationId: vincularProducto
+      description: Enviar `productoId` o `nuevoProducto` (no ambos). El registro sale de la lista y su oferta se
+        importa. Una segunda vinculación responde 409.
+      x-roles:
+      - DUENO
+      x-acceptance-criteria:
+      - RF-10-AC-4
+      parameters:
+      - $ref: '#/components/parameters/ProductoPorVincularId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VinculacionCrear'
+      responses:
+        '201':
+          description: Vinculado; devuelve la oferta importada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Oferta'
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+        '400':
+          $ref: '#/components/responses/SolicitudMalFormada'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '422':
+          $ref: '#/components/responses/ErrorValidacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /ofertas:
+    post:
+      tags:
+      - Proveedores
+      summary: Capturar oferta manual (precios recibidos por WhatsApp u otro medio)
+      operationId: capturarOfertaManual
+      description: Capturar oferta manual (precios recibidos por WhatsApp u otro medio).
+      x-roles:
+      - DUENO
+      x-acceptance-criteria:
+      - RF-11-AC-1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OfertaManualCrear'
+      responses:
+        '201':
+          description: Oferta con origen MANUAL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Oferta'
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+        '400':
+          $ref: '#/components/responses/SolicitudMalFormada'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '422':
+          $ref: '#/components/responses/ErrorValidacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /ofertas/{ofertaId}:
+    patch:
+      tags:
+      - Proveedores
+      summary: Actualizar una oferta manual (renueva su fecha de actualización)
+      operationId: actualizarOfertaManual
+      description: 'Las ofertas SINCRONIZADA solo cambian por sincronización: responder 409.'
+      x-roles:
+      - DUENO
+      x-acceptance-criteria:
+      - RF-11-AC-1
+      - RF-11-AC-2
+      parameters:
+      - $ref: '#/components/parameters/OfertaId'
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: '#/components/schemas/OfertaActualizar'
+      responses:
+        '200':
+          description: Oferta actualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Oferta'
+        '400':
+          $ref: '#/components/responses/SolicitudMalFormada'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '422':
+          $ref: '#/components/responses/ErrorValidacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /productos/{productoId}/ofertas:
+    get:
+      tags:
+      - Proveedores
+      summary: Comparación normalizada de ofertas por costo por unidad base
+      operationId: compararOfertas
+      description: Ordena vigentes de menor a mayor costo por unidad base, con etiquetas MENOR_COSTO y ENTREGA_MAS_RAPIDA;
+        las no vigentes van al final sin etiquetas.
+      x-roles:
+      - DUENO
+      x-acceptance-criteria:
+      - RF-12-AC-1
+      - RF-12-AC-2
+      - RF-12-AC-3
+      - RF-11-AC-1
+      - RF-11-AC-2
+      - RF-01-AC-3
+      parameters:
+      - $ref: '#/components/parameters/ProductoId'
+      responses:
+        '200':
+          description: Comparación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComparacionOfertas'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /productos/{productoId}/sugerencia-proveedor:
+    get:
+      tags:
+      - Proveedores
+      summary: Proveedor sugerido para la cantidad sugerida
+      operationId: sugerirProveedor
+      description: 'Sin urgencia: menor costo por unidad base; con urgencia: menos días de entrega; el empate se
+        resuelve con el otro criterio. Si ninguna oferta vigente alcanza, `oferta` es null y `mensaje` = "Sin proveedor
+        con existencia".'
+      x-roles:
+      - DUENO
+      x-acceptance-criteria:
+      - RF-13-AC-1
+      - RF-13-AC-2
+      - RF-13-AC-3
+      - RF-13-AC-5
+      parameters:
+      - $ref: '#/components/parameters/ProductoId'
+      - name: urgente
+        in: query
+        schema:
+          type: boolean
+          default: false
+      responses:
+        '200':
+          description: Sugerencia
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SugerenciaProveedor'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /propuestas-compra:
+    post:
+      tags:
+      - Proveedores
+      summary: Generar propuesta con los productos en o bajo su PR
+      operationId: generarPropuestaCompra
+      description: No se envía al proveedor ni modifica inventario. Si no hay productos por reabastecer responde
+        422 con codigo SIN_PRODUCTOS_POR_REABASTECER.
+      x-roles:
+      - DUENO
+      x-acceptance-criteria:
+      - RF-14-AC-1
+      - RF-14-AC-3
+      responses:
+        '201':
+          description: Propuesta generada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PropuestaCompra'
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '422':
+          $ref: '#/components/responses/ErrorValidacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /propuestas-compra/{propuestaId}:
+    get:
+      tags:
+      - Proveedores
+      summary: Consultar propuesta de compra
+      operationId: consultarPropuestaCompra
+      description: Consultar propuesta de compra.
+      x-roles:
+      - DUENO
+      x-acceptance-criteria:
+      - RF-14-AC-2
+      parameters:
+      - $ref: '#/components/parameters/PropuestaId'
+      responses:
+        '200':
+          description: Propuesta
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PropuestaCompra'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /propuestas-compra/{propuestaId}/renglones:
+    put:
+      tags:
+      - Proveedores
+      summary: Reemplazar la lista completa de renglones (editar cantidad o proveedor, o eliminar)
+      operationId: reemplazarRenglonesPropuesta
+      description: 'PUT idempotente: la lista enviada sustituye a la anterior. Omitir un renglón lo elimina.'
+      x-roles:
+      - DUENO
+      x-acceptance-criteria:
+      - RF-14-AC-2
+      parameters:
+      - $ref: '#/components/parameters/PropuestaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              minItems: 1
+              items:
+                $ref: '#/components/schemas/RenglonPropuestaEntrada'
+      responses:
+        '200':
+          description: Propuesta guardada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PropuestaCompra'
+        '400':
+          $ref: '#/components/responses/SolicitudMalFormada'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '422':
+          $ref: '#/components/responses/ErrorValidacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /ventas:
+    post:
+      tags:
+      - Ventas
+      summary: Confirmar venta de mostrador (o capturar venta diferida)
+      operationId: confirmarVenta
+      description: 'Una sola transacción: bloquea la fila de cada producto, valida disponible y pago, asigna folio,
+        descuenta con FEFO (lote que caduca hoy incluido) y registra auditoría. Si algún renglón excede la disponible,
+        rechaza toda la venta con 409 y `productosAgotados`. Con `fechaHoraReal` (≤ 3 días atrás) es venta diferida:
+        se registra completa y, si excede la disponible, descuenta solo lo disponible y marca DESCUADRE (RF-19-AC-2).
+        Requiere `Idempotency-Key`: un reintento por internet intermitente no duplica la venta.'
+      x-roles:
+      - DUENO
+      - EMPLEADO
+      x-acceptance-criteria:
+      - RF-16-AC-1
+      - RF-16-AC-3
+      - RF-16-AC-4
+      - RF-16-AC-5
+      - RF-16-AC-6
+      - RF-16-AC-7
+      - RF-19-AC-1
+      - RF-19-AC-2
+      - RF-19-AC-3
+      - RF-07-AC-4
+      - RF-09-AC-1
+      - RF-09-AC-3
+      - RF-01-AC-4
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VentaCrear'
+      responses:
+        '201':
+          description: Venta COMPLETADA
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Venta'
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+        '400':
+          $ref: '#/components/responses/SolicitudMalFormada'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '409':
+          $ref: '#/components/responses/ProductoAgotado'
+        '422':
+          $ref: '#/components/responses/ErrorValidacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    get:
+      tags:
+      - Ventas
+      summary: Listar ventas con filtros
+      operationId: listarVentas
+      description: Listar ventas con filtros.
+      x-roles:
+      - DUENO
+      - EMPLEADO
+      x-acceptance-criteria:
+      - RF-17-AC-1
+      - RF-20-AC-2
+      parameters:
+      - $ref: '#/components/parameters/Pagina'
+      - $ref: '#/components/parameters/TamanoPagina'
+      - $ref: '#/components/parameters/Desde'
+      - $ref: '#/components/parameters/Hasta'
+      - name: estado
+        in: query
+        schema:
+          $ref: '#/components/schemas/EstadoVenta'
+      - name: metodoPago
+        in: query
+        schema:
+          $ref: '#/components/schemas/MetodoPago'
+      - name: diferida
+        in: query
+        schema:
+          type: boolean
+      - name: sinCorte
+        in: query
+        schema:
+          type: boolean
+      responses:
+        '200':
+          description: Página de ventas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginaVenta'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /ventas/{folio}:
+    get:
+      tags:
+      - Ventas
+      summary: Comprobante no fiscal de la venta
+      operationId: consultarComprobante
+      description: 'Precios almacenados al momento de la venta. La venta es inmutable: no existen PUT, PATCH ni
+        DELETE sobre este recurso y el servidor responde 405 (RF-18-AC-4).'
+      x-roles:
+      - DUENO
+      - EMPLEADO
+      x-acceptance-criteria:
+      - RF-17-AC-1
+      - RF-17-AC-2
+      - RF-17-AC-3
+      - RF-18-AC-4
+      parameters:
+      - $ref: '#/components/parameters/Folio'
+      responses:
+        '200':
+          description: Comprobante
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Venta'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /ventas/{folio}/cancelacion:
+    post:
+      tags:
+      - Ventas
+      summary: Cancelar una venta completada (crea su cancelación)
+      operationId: cancelarVenta
+      description: 'Reintegra las unidades a los lotes de los que salieron. La cancelación es única: una segunda
+        responde 409 sin tocar existencias. Una venta de un corte cerrado responde 409 con "La venta pertenece a
+        un corte cerrado".'
+      x-roles:
+      - DUENO
+      - EMPLEADO
+      x-acceptance-criteria:
+      - RF-18-AC-1
+      - RF-18-AC-2
+      - RF-18-AC-3
+      - RF-09-AC-5
+      parameters:
+      - $ref: '#/components/parameters/Folio'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelacionCrear'
+      responses:
+        '201':
+          description: Venta CANCELADA
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Venta'
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+        '400':
+          $ref: '#/components/responses/SolicitudMalFormada'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '422':
+          $ref: '#/components/responses/ErrorValidacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /cortes/actual:
+    get:
+      tags:
+      - Ventas
+      summary: 'Vista previa del corte: ventas en efectivo y con tarjeta aún sin corte'
+      operationId: consultarCorteActual
+      description: Recurso calculado; no se guarda. Excluye canceladas y ventas en línea.
+      x-roles:
+      - DUENO
+      - EMPLEADO
+      x-acceptance-criteria:
+      - RF-20-AC-1
+      - RF-20-AC-2
+      responses:
+        '200':
+          description: Montos esperados
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CorteActual'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /cortes:
+    post:
+      tags:
+      - Ventas
+      summary: Confirmar el corte con el efectivo contado
+      operationId: confirmarCorte
+      description: Incluye todas las ventas completadas sin corte. Después de confirmar, esas ventas ya no se pueden
+        cancelar (RF-18-AC-3).
+      x-roles:
+      - DUENO
+      - EMPLEADO
+      x-acceptance-criteria:
+      - RF-20-AC-1
+      - RF-20-AC-2
+      - RF-20-AC-3
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CorteCrear'
+      responses:
+        '201':
+          description: Corte registrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Corte'
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+        '400':
+          $ref: '#/components/responses/SolicitudMalFormada'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '422':
+          $ref: '#/components/responses/ErrorValidacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    get:
+      tags:
+      - Ventas
+      summary: Historial de cortes
+      operationId: listarCortes
+      description: Historial de cortes.
+      x-roles:
+      - DUENO
+      - EMPLEADO
+      x-acceptance-criteria:
+      - RF-20-AC-3
+      parameters:
+      - $ref: '#/components/parameters/Pagina'
+      - $ref: '#/components/parameters/TamanoPagina'
+      - $ref: '#/components/parameters/Desde'
+      - $ref: '#/components/parameters/Hasta'
+      responses:
+        '200':
+          description: Página de cortes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginaCorte'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /cortes/{corteId}:
+    get:
+      tags:
+      - Ventas
+      summary: Consultar un corte
+      operationId: consultarCorte
+      description: Consultar un corte.
+      x-roles:
+      - DUENO
+      - EMPLEADO
+      x-acceptance-criteria:
+      - RF-20-AC-3
+      parameters:
+      - $ref: '#/components/parameters/CorteId'
+      responses:
+        '200':
+          description: Corte
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Corte'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /catalogo/productos:
+    get:
+      tags:
+      - Tienda en línea
+      summary: Catálogo público
+      operationId: buscarCatalogo
+      description: Público, sin sesión (S-08). Excluye restringidos e inactivos. Muestra disponibilidad DISPONIBLE/AGOTADO
+        sin existencia exacta, costos ni proveedores.
+      security: []
+      x-roles:
+      - PUBLICO
+      x-acceptance-criteria:
+      - RF-21-AC-1
+      - RF-21-AC-2
+      - RF-21-AC-3
+      - RF-01-AC-6
+      - RF-04-AC-5
+      parameters:
+      - $ref: '#/components/parameters/Pagina'
+      - $ref: '#/components/parameters/TamanoPagina'
+      - name: q
+        in: query
+        schema:
+          type: string
+          minLength: 2
+      - name: categoriaId
+        in: query
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Página del catálogo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginaProductoCatalogo'
+        '422':
+          $ref: '#/components/responses/ErrorValidacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /catalogo/productos/{productoId}:
+    get:
+      tags:
+      - Tienda en línea
+      summary: Ficha pública de un producto
+      operationId: consultarProductoCatalogo
+      description: Ficha pública de un producto.
+      security: []
+      x-roles:
+      - PUBLICO
+      x-acceptance-criteria:
+      - RF-21-AC-1
+      - RF-21-AC-2
+      parameters:
+      - $ref: '#/components/parameters/ProductoId'
+      responses:
+        '200':
+          description: Producto del catálogo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductoCatalogo'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /carrito:
+    get:
+      tags:
+      - Tienda en línea
+      summary: Carrito del cliente autenticado
+      operationId: consultarCarrito
+      description: 'Se conserva en el servidor: sobrevive a un pago rechazado (RF-23-AC-4) y al cambio de dispositivo.'
+      x-roles:
+      - CLIENTE
+      x-acceptance-criteria:
+      - RF-23-AC-4
+      responses:
+        '200':
+          description: Carrito
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Carrito'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    delete:
+      tags:
+      - Tienda en línea
+      summary: Vaciar el carrito
+      operationId: vaciarCarrito
+      description: Vaciar el carrito.
+      x-roles:
+      - CLIENTE
+      x-acceptance-criteria:
+      - RF-22-AC-6
+      responses:
+        '204':
+          description: Carrito vacío
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /carrito/renglones/{productoId}:
+    put:
+      tags:
+      - Tienda en línea
+      summary: Agregar un producto o fijar su cantidad en el carrito
+      operationId: fijarCantidadCarrito
+      description: 'Idempotente: fija la cantidad, no la suma. Si excede la disponible responde 409 con "Solo hay
+        N disponibles"; un producto agotado o restringido no se agrega.'
+      x-roles:
+      - CLIENTE
+      x-acceptance-criteria:
+      - RF-22-AC-5
+      - RF-21-AC-3
+      - RF-22-AC-9
+      parameters:
+      - $ref: '#/components/parameters/ProductoId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CantidadCarrito'
+      responses:
+        '200':
+          description: Carrito actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Carrito'
+        '400':
+          $ref: '#/components/responses/SolicitudMalFormada'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/ProductoAgotado'
+        '422':
+          $ref: '#/components/responses/ErrorValidacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    delete:
+      tags:
+      - Tienda en línea
+      summary: Quitar un producto del carrito
+      operationId: quitarDelCarrito
+      description: Quitar un producto del carrito.
+      x-roles:
+      - CLIENTE
+      x-acceptance-criteria:
+      - RF-22-AC-6
+      parameters:
+      - $ref: '#/components/parameters/ProductoId'
+      responses:
+        '204':
+          description: Renglón eliminado
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /pedidos:
+    post:
+      tags:
+      - Pedidos
+      summary: Crear pedido anticipado a partir del carrito
+      operationId: crearPedido
+      description: Crea el pedido en PENDIENTE_DE_PAGO y aparta las cantidades durante 15 minutos (`pagoVenceEn`).
+        Valida modalidad, dirección, código postal atendido, pedido mínimo para envío y productos restringidos.
+        Copia el costo de envío vigente (RF-28-AC-3). Requiere `Idempotency-Key`.
+      x-roles:
+      - CLIENTE
+      x-acceptance-criteria:
+      - RF-22-AC-1
+      - RF-22-AC-2
+      - RF-22-AC-3
+      - RF-22-AC-4
+      - RF-22-AC-6
+      - RF-22-AC-9
+      - RF-16-AC-6
+      - RF-28-AC-3
+      - RF-28-AC-4
+      - RF-01-AC-6
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PedidoCrear'
+      responses:
+        '201':
+          description: Pedido PENDIENTE_DE_PAGO
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pedido'
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+        '400':
+          $ref: '#/components/responses/SolicitudMalFormada'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '409':
+          $ref: '#/components/responses/ProductoAgotado'
+        '422':
+          $ref: '#/components/responses/ErrorValidacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    get:
+      tags:
+      - Pedidos
+      summary: Listar pedidos
+      operationId: listarPedidos
+      description: El Cliente solo recibe los suyos, del más reciente al más antiguo. La tienda ve todos; "Por preparar"
+        = `estado=PAGADO&fechaProgramada=<hoy>`.
+      x-roles:
+      - DUENO
+      - EMPLEADO
+      - CLIENTE
+      x-acceptance-criteria:
+      - RF-26-AC-1
+      - RF-26-AC-4
+      - RF-22-AC-7
+      parameters:
+      - $ref: '#/components/parameters/Pagina'
+      - $ref: '#/components/parameters/TamanoPagina'
+      - $ref: '#/components/parameters/Desde'
+      - $ref: '#/components/parameters/Hasta'
+      - name: estado
+        in: query
+        schema:
+          $ref: '#/components/schemas/EstadoPedido'
+      - name: modalidad
+        in: query
+        schema:
+          $ref: '#/components/schemas/Modalidad'
+      - name: fechaProgramada
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: empleadoAsignadoId
+        in: query
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Página de pedidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginaPedido'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /pedidos/{folio}:
+    get:
+      tags:
+      - Pedidos
+      summary: Consultar un pedido
+      operationId: consultarPedido
+      description: Un pedido de otro cliente responde 404, no 403, para no revelar su existencia. `contacto` solo
+        se llena para la tienda en los estados permitidos por RNF-10.
+      x-roles:
+      - DUENO
+      - EMPLEADO
+      - CLIENTE
+      x-acceptance-criteria:
+      - RF-26-AC-1
+      - RF-26-AC-4
+      - RF-22-AC-7
+      - RF-01-AC-6
+      parameters:
+      - $ref: '#/components/parameters/Folio'
+      responses:
+        '200':
+          description: Pedido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pedido'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    patch:
+      tags:
+      - Pedidos
+      summary: Asignar el empleado responsable del pedido
+      operationId: asignarEmpleadoPedido
+      description: Un Empleado solo puede asignarse a sí mismo; el Dueño puede asignar a cualquiera.
+      x-roles:
+      - DUENO
+      - EMPLEADO
+      x-acceptance-criteria:
+      - RF-24-AC-1
+      parameters:
+      - $ref: '#/components/parameters/Folio'
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: '#/components/schemas/PedidoActualizar'
+      responses:
+        '200':
+          description: Pedido con responsable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pedido'
+        '400':
+          $ref: '#/components/responses/SolicitudMalFormada'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '422':
+          $ref: '#/components/responses/ErrorValidacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /pedidos/{folio}/pagos:
+    post:
+      tags:
+      - Pagos
+      summary: Iniciar el pago en línea (crea la preferencia de Checkout Pro)
+      operationId: iniciarPago
+      description: Solo existe pago en línea anticipado (RF-23-AC-7). El pedido pasa a PAGADO únicamente por webhook
+        auténtico o conciliación, nunca por esta llamada. Requiere `Idempotency-Key`.
+      x-roles:
+      - CLIENTE
+      x-acceptance-criteria:
+      - RF-23-AC-7
+      - RF-23-AC-4
+      parameters:
+      - $ref: '#/components/parameters/Folio'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: Pago PENDIENTE con URL de checkout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pago'
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    get:
+      tags:
+      - Pagos
+      summary: Intentos de pago del pedido
+      operationId: listarPagosPedido
+      description: Permite al portal mostrar "Tu pago no fue aprobado, intenta con otro método" cuando el último
+        intento está RECHAZADO.
+      x-roles:
+      - DUENO
+      - EMPLEADO
+      - CLIENTE
+      x-acceptance-criteria:
+      - RF-23-AC-4
+      - RF-23-AC-1
+      parameters:
+      - $ref: '#/components/parameters/Folio'
+      responses:
+        '200':
+          description: Pagos
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Pago'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /pedidos/{folio}/transiciones:
+    post:
+      tags:
+      - Pedidos
+      summary: Cambiar el estado del pedido (crea una transición en su historial)
+      operationId: cambiarEstadoPedido
+      description: 'Valida la máquina de estados de RF-24 y la modalidad. Errores: 409 "Asigna un empleado al pedido",
+        409 "Estado no válido para esta modalidad", 409 "Transición de estado no permitida". Permisos: el Cliente
+        solo puede llevar su pedido de PAGADO a CANCELADO; el Empleado no puede cancelar (403). Pasar a ENTREGADO
+        descuenta con FEFO, libera el apartado y registra la venta en línea. Cancelar un pedido pagado crea un reembolso
+        total.'
+      x-roles:
+      - DUENO
+      - EMPLEADO
+      - CLIENTE
+      x-acceptance-criteria:
+      - RF-24-AC-1
+      - RF-24-AC-2
+      - RF-24-AC-3
+      - RF-24-AC-4
+      - RF-24-AC-5
+      - RF-24-AC-6
+      - RF-24-AC-8
+      - RF-26-AC-2
+      - RF-26-AC-3
+      - RF-09-AC-5
+      parameters:
+      - $ref: '#/components/parameters/Folio'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransicionCrear'
+      responses:
+        '201':
+          description: Transición aplicada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transicion'
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+        '400':
+          $ref: '#/components/responses/SolicitudMalFormada'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '422':
+          $ref: '#/components/responses/ErrorValidacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    get:
+      tags:
+      - Pedidos
+      summary: Historial de estados del pedido
+      operationId: listarHistorialPedido
+      description: Historial de estados del pedido.
+      x-roles:
+      - DUENO
+      - EMPLEADO
+      - CLIENTE
+      x-acceptance-criteria:
+      - RF-24-AC-3
+      - RF-26-AC-1
+      parameters:
+      - $ref: '#/components/parameters/Folio'
+      responses:
+        '200':
+          description: Historial
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Transicion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /pedidos/{folio}/renglones/{renglonId}/faltante:
+    put:
+      tags:
+      - Pedidos
+      summary: Marcar faltante total o parcial en un renglón
+      operationId: marcarFaltante
+      description: Idempotente. El pedido pasa a ESPERANDO_RESPUESTA_CLIENTE, se registra un ajuste de inventario
+        y se notifica al cliente; el plazo de respuesta queda en `respuestaFaltanteVenceEn`.
+      x-roles:
+      - DUENO
+      - EMPLEADO
+      x-acceptance-criteria:
+      - RF-25-AC-1
+      parameters:
+      - $ref: '#/components/parameters/Folio'
+      - $ref: '#/components/parameters/RenglonId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FaltanteActualizar'
+      responses:
+        '200':
+          description: Pedido esperando respuesta
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pedido'
+        '400':
+          $ref: '#/components/responses/SolicitudMalFormada'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '422':
+          $ref: '#/components/responses/ErrorValidacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /pedidos/{folio}/renglones/{renglonId}/faltante/respuesta:
+    put:
+      tags:
+      - Pedidos
+      summary: 'Respuesta del cliente: reembolso o sustituto'
+      operationId: responderFaltante
+      description: REEMBOLSO crea un reembolso del faltante. SUSTITUTO aparta un producto de igual o menor precio
+        con disponible y reembolsa la diferencia. Si el sustituto se agotó responde 409 "El sustituto ya no está
+        disponible". El costo de envío nunca se reembolsa (RD-11).
+      x-roles:
+      - CLIENTE
+      x-acceptance-criteria:
+      - RF-25-AC-2
+      - RF-25-AC-3
+      - RF-25-AC-5
+      parameters:
+      - $ref: '#/components/parameters/Folio'
+      - $ref: '#/components/parameters/RenglonId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RespuestaFaltante'
+      responses:
+        '200':
+          description: Pedido de vuelta EN_PREPARACION
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pedido'
+        '400':
+          $ref: '#/components/responses/SolicitudMalFormada'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '422':
+          $ref: '#/components/responses/ErrorValidacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /pedidos/{folio}/resolucion:
+    post:
+      tags:
+      - Pagos
+      summary: Registrar la resolución de un pedido NO_RECOGIDO
+      operationId: resolverNoRecogido
+      description: 'Reembolso TOTAL, PARCIAL (monto ≤ pagado) o NINGUNO. El pedido pasa a CANCELADO. La resolución
+        es única: una segunda responde 409.'
+      x-roles:
+      - DUENO
+      x-acceptance-criteria:
+      - RF-27-AC-3
+      - RF-27-AC-4
+      parameters:
+      - $ref: '#/components/parameters/Folio'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolucionCrear'
+      responses:
+        '201':
+          description: Resolución registrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Resolucion'
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+        '400':
+          $ref: '#/components/responses/SolicitudMalFormada'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '422':
+          $ref: '#/components/responses/ErrorValidacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /reembolsos:
+    get:
+      tags:
+      - Pagos
+      summary: Reembolsos (panel del Dueño)
+      operationId: listarReembolsos
+      description: Reembolsos (panel del Dueño).
+      x-roles:
+      - DUENO
+      x-acceptance-criteria:
+      - RF-27-AC-1
+      - RF-27-AC-2
+      parameters:
+      - $ref: '#/components/parameters/Pagina'
+      - $ref: '#/components/parameters/TamanoPagina'
+      - name: estado
+        in: query
+        schema:
+          $ref: '#/components/schemas/EstadoReembolso'
+      - name: folio
+        in: query
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Página de reembolsos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginaReembolso'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /reembolsos/{reembolsoId}:
+    get:
+      tags:
+      - Pagos
+      summary: Consultar un reembolso
+      operationId: consultarReembolso
+      description: Consultar un reembolso.
+      x-roles:
+      - DUENO
+      - CLIENTE
+      x-acceptance-criteria:
+      - RF-27-AC-1
+      parameters:
+      - $ref: '#/components/parameters/ReembolsoId'
+      responses:
+        '200':
+          description: Reembolso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reembolso'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /reembolsos/{reembolsoId}/reintentos:
+    post:
+      tags:
+      - Pagos
+      summary: Reintentar un reembolso FALLIDO
+      operationId: reintentarReembolso
+      description: Crea una nueva solicitud ante el servicio de pagos. Solo aplica a reembolsos FALLIDO (409 en
+        otro caso).
+      x-roles:
+      - DUENO
+      x-acceptance-criteria:
+      - RF-27-AC-2
+      parameters:
+      - $ref: '#/components/parameters/ReembolsoId'
+      responses:
+        '202':
+          description: Reembolso SOLICITADO de nuevo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reembolso'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /webhooks/mercado-pago:
+    post:
+      tags:
+      - Pagos
+      summary: Notificación de pago o reembolso de Mercado Pago
+      operationId: recibirNotificacionMercadoPago
+      description: 'Autenticado por firma HMAC (`x-signature`), no por JWT. Idempotente: el id de la notificación
+        se registra y un duplicado responde 200 sin cambios ni segundo correo. El backend consulta el pago en la
+        API de MP antes de actuar. Pago aprobado por monto exacto → PAGADO; pedido EXPIRADO → se vuelve a apartar
+        o se reembolsa; monto distinto → alerta al Dueño; rechazo → el pedido sigue PENDIENTE_DE_PAGO.'
+      security:
+      - firmaMercadoPago: []
+      x-roles:
+      - MERCADO_PAGO
+      x-acceptance-criteria:
+      - RF-23-AC-1
+      - RF-23-AC-2
+      - RF-23-AC-4
+      - RF-23-AC-5
+      - RF-23-AC-6
+      - RF-27-AC-1
+      - RF-27-AC-2
+      - RF-09-AC-2
+      - RF-22-AC-7
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificacionMercadoPago'
+      responses:
+        '200':
+          description: Notificación procesada o ya procesada
+        '400':
+          $ref: '#/components/responses/SolicitudMalFormada'
+        '401':
+          $ref: '#/components/responses/FirmaInvalida'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /configuracion:
+    get:
+      tags:
+      - Administración
+      summary: Configuración de la tienda
+      operationId: consultarConfiguracion
+      description: Configuración de la tienda.
+      x-roles:
+      - DUENO
+      x-acceptance-criteria:
+      - RF-28-AC-1
+      responses:
+        '200':
+          description: Configuración
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Configuracion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    patch:
+      tags:
+      - Administración
+      summary: Cambiar uno o varios valores de configuración
+      operationId: actualizarConfiguracion
+      description: Los cambios aplican a operaciones posteriores; los pedidos existentes conservan su costo de envío.
+      x-roles:
+      - DUENO
+      x-acceptance-criteria:
+      - RF-28-AC-1
+      - RF-28-AC-2
+      - RF-28-AC-3
+      - RF-28-AC-4
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: '#/components/schemas/ConfiguracionActualizar'
+      responses:
+        '200':
+          description: Configuración guardada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Configuracion'
+        '400':
+          $ref: '#/components/responses/SolicitudMalFormada'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '422':
+          $ref: '#/components/responses/ErrorValidacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /reportes/ventas-diarias:
+    get:
+      tags:
+      - Reportes
+      summary: Reporte diario de ventas
+      operationId: consultarReporteDiario
+      description: Reporte diario de ventas.
+      x-roles:
+      - DUENO
+      x-acceptance-criteria:
+      - RF-29-AC-1
+      - RF-29-AC-4
+      - RF-29-AC-5
+      - RF-19-AC-1
+      parameters:
+      - name: fecha
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date
+      responses:
+        '200':
+          description: Reporte
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReporteDiario'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '422':
+          $ref: '#/components/responses/ErrorValidacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /reportes/rotacion:
+    get:
+      tags:
+      - Reportes
+      summary: Rotación de productos en un periodo (sin canceladas)
+      operationId: consultarRotacion
+      description: Rotación de productos en un periodo (sin canceladas).
+      x-roles:
+      - DUENO
+      x-acceptance-criteria:
+      - RF-29-AC-2
+      - RF-29-AC-5
+      parameters:
+      - $ref: '#/components/parameters/DesdeRequerido'
+      - $ref: '#/components/parameters/HastaRequerido'
+      - $ref: '#/components/parameters/Pagina'
+      - $ref: '#/components/parameters/TamanoPagina'
+      responses:
+        '200':
+          description: Productos de mayor a menor rotación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginaRenglonRotacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '422':
+          $ref: '#/components/responses/ErrorValidacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /reportes/indicadores:
+    get:
+      tags:
+      - Reportes
+      summary: Faltantes, diferencias de caja y pedidos en línea del periodo
+      operationId: consultarIndicadores
+      description: Faltantes, diferencias de caja y pedidos en línea del periodo.
+      x-roles:
+      - DUENO
+      x-acceptance-criteria:
+      - RF-29-AC-3
+      - RF-29-AC-4
+      - RF-29-AC-5
+      parameters:
+      - $ref: '#/components/parameters/DesdeRequerido'
+      - $ref: '#/components/parameters/HastaRequerido'
+      responses:
+        '200':
+          description: Indicadores
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Indicadores'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '422':
+          $ref: '#/components/responses/ErrorValidacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /procesos/{proceso}/ejecuciones:
+    post:
+      tags:
+      - Administración
+      summary: Ejecutar bajo demanda un proceso programado del worker
+      operationId: ejecutarProceso
+      description: 'Ejecuta el mismo servicio que dispara el reloj, con advisory lock (409 si ya corre). `fechaReferencia`
+        simula la fecha del proceso y solo se acepta fuera de producción (pruebas S09). Procesos: CADUCIDADES (7:00),
+        PUNTO_REORDEN (6:00), EXPIRACION_PEDIDOS (cada minuto: 15 min sin pago y 24 h expirado), CONCILIACION_PAGOS
+        (cada 10 min), NO_RECOGIDOS (20:00), FALTANTES_VENCIDOS (cada minuto).'
+      x-roles:
+      - DUENO
+      x-acceptance-criteria:
+      - RF-07-AC-2
+      - RF-07-AC-3
+      - RF-08-AC-3
+      - RF-08-AC-4
+      - RF-08-AC-5
+      - RF-08-AC-6
+      - RF-13-AC-4
+      - RF-28-AC-1
+      - RF-22-AC-8
+      - RF-23-AC-3
+      - RF-27-AC-1
+      - RF-24-AC-7
+      - RF-25-AC-4
+      - RF-09-AC-5
+      parameters:
+      - $ref: '#/components/parameters/Proceso'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EjecucionCrear'
+      responses:
+        '202':
+          description: Ejecución iniciada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ejecucion'
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+        '400':
+          $ref: '#/components/responses/SolicitudMalFormada'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '422':
+          $ref: '#/components/responses/ErrorValidacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+  /procesos/{proceso}/ejecuciones/{ejecucionId}:
+    get:
+      tags:
+      - Administración
+      summary: Resultado de una ejecución de proceso
+      operationId: consultarEjecucion
+      description: Resultado de una ejecución de proceso.
+      x-roles:
+      - DUENO
+      x-acceptance-criteria:
+      - RF-07-AC-2
+      - RF-08-AC-3
+      parameters:
+      - $ref: '#/components/parameters/Proceso'
+      - $ref: '#/components/parameters/EjecucionId'
+      responses:
+        '200':
+          description: Ejecución
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ejecucion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SinPermiso'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT con claims `sub` (id de usuario) y `rol`. La API verifica en cada petición que la cuenta
+        siga activa.
+    firmaMercadoPago:
+      type: apiKey
+      in: header
+      name: x-signature
+      description: Firma HMAC-SHA256 de Mercado Pago (ts + v1) calculada con el secreto del webhook; se valida junto
+        con x-request-id.
+  headers:
+    Location:
+      description: URI del recurso creado
+      schema:
+        type: string
+        format: uri-reference
+  parameters:
+    Pagina:
+      name: page
+      in: query
+      description: Número de página (desde 1)
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    TamanoPagina:
+      name: pageSize
+      in: query
+      description: Elementos por página
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    Desde:
+      name: desde
+      in: query
+      schema:
+        type: string
+        format: date
+    Hasta:
+      name: hasta
+      in: query
+      schema:
+        type: string
+        format: date
+    DesdeRequerido:
+      name: desde
+      in: query
+      required: true
+      schema:
+        type: string
+        format: date
+    HastaRequerido:
+      name: hasta
+      in: query
+      required: true
+      schema:
+        type: string
+        format: date
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: UUID generado por el portal. Repetir la misma clave con el mismo cuerpo devuelve la respuesta
+        original sin repetir la operación (24 h). La misma clave con otro cuerpo responde 422.
+      schema:
+        type: string
+        format: uuid
+    UsuarioId:
+      name: usuarioId
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    ProductoId:
+      name: productoId
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    LoteId:
+      name: loteId
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    SincronizacionId:
+      name: sincronizacionId
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    ProductoPorVincularId:
+      name: productoPorVincularId
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    OfertaId:
+      name: ofertaId
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    PropuestaId:
+      name: propuestaId
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    Folio:
+      name: folio
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+      description: Folio único e incremental
+    CorteId:
+      name: corteId
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    RenglonId:
+      name: renglonId
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    ReembolsoId:
+      name: reembolsoId
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    EjecucionId:
+      name: ejecucionId
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    Proceso:
+      name: proceso
+      in: path
+      required: true
+      schema:
+        type: string
+        enum:
+        - CADUCIDADES
+        - PUNTO_REORDEN
+        - EXPIRACION_PEDIDOS
+        - CONCILIACION_PAGOS
+        - NO_RECOGIDOS
+        - FALTANTES_VENCIDOS
+      description: Proceso programado del worker
+  responses:
+    SolicitudMalFormada:
+      description: El cuerpo no es JSON válido o no corresponde al tipo de contenido
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+          example:
+            type: https://tiendinet.mx/problemas/solicitud-mal-formada
+            title: Solicitud mal formada
+            status: 400
+            codigo: SOLICITUD_MAL_FORMADA
+    NoAutenticado:
+      description: Falta el JWT, expiró o la cuenta está inactiva
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+          example:
+            type: https://tiendinet.mx/problemas/no-autenticado
+            title: No autenticado
+            status: 401
+            codigo: NO_AUTENTICADO
+    CredencialesInvalidas:
+      description: Credenciales incorrectas o usuario inactivo
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+          example:
+            type: https://tiendinet.mx/problemas/credenciales
+            title: Credenciales inválidas
+            status: 401
+            detail: Correo o contraseña incorrectos
+            codigo: CREDENCIALES_INVALIDAS
+    FirmaInvalida:
+      description: La firma x-signature no corresponde
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+          example:
+            type: https://tiendinet.mx/problemas/firma-invalida
+            title: Firma inválida
+            status: 401
+            codigo: FIRMA_INVALIDA
+    SinPermiso:
+      description: El rol no tiene permiso para esta operación (matriz SRS §3.4)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+          example:
+            type: https://tiendinet.mx/problemas/sin-permiso
+            title: Sin permiso
+            status: 403
+            codigo: SIN_PERMISO
+    NoEncontrado:
+      description: El recurso no existe o no pertenece al usuario
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+          example:
+            type: https://tiendinet.mx/problemas/no-encontrado
+            title: No encontrado
+            status: 404
+            codigo: NO_ENCONTRADO
+    EnlaceExpirado:
+      description: El enlace ya se usó o venció
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+          example:
+            type: https://tiendinet.mx/problemas/enlace-expirado
+            title: Enlace expirado
+            status: 410
+            detail: Enlace inválido o expirado
+            codigo: ENLACE_EXPIRADO
+    Conflicto:
+      description: La operación choca con el estado actual del recurso
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+          example:
+            type: https://tiendinet.mx/problemas/conflicto
+            title: Conflicto
+            status: 409
+            detail: Transición de estado no permitida
+            codigo: TRANSICION_NO_PERMITIDA
+    ProductoAgotado:
+      description: Uno o más productos no tienen disponible suficiente
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+          example:
+            type: https://tiendinet.mx/problemas/producto-agotado
+            title: Producto agotado
+            status: 409
+            detail: Producto agotado
+            codigo: PRODUCTO_AGOTADO
+            productosAgotados:
+            - productoId: 12
+              nombre: Aceite vegetal 1 L
+              solicitada: 2
+              disponible: 0
+    ErrorValidacion:
+      description: Datos válidos en formato pero que incumplen una regla del dominio
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+          example:
+            type: https://tiendinet.mx/problemas/validacion
+            title: Datos inválidos
+            status: 422
+            detail: La fecha de caducidad es obligatoria para productos perecederos
+            codigo: VALIDACION
+            errores:
+            - campo: fechaCaducidad
+              mensaje: Obligatoria
+    DemasiadosIntentos:
+      description: 5 intentos fallidos consecutivos de correo + IP; reintentar después de 15 min
+      headers:
+        Retry-After:
+          description: Segundos para reintentar
+          schema:
+            type: integer
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+          example:
+            type: https://tiendinet.mx/problemas/demasiados-intentos
+            title: Demasiados intentos
+            status: 429
+            codigo: DEMASIADOS_INTENTOS
+    ErrorInterno:
+      description: Error no previsto del servidor; se registra con un id de correlación
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+          example:
+            type: https://tiendinet.mx/problemas/error-interno
+            title: Error interno
+            status: 500
+            codigo: ERROR_INTERNO
+  schemas:
+    Problema:
+      type: object
+      description: Problem Details (RFC 7807).
+      required:
+      - type
+      - title
+      - status
+      - codigo
+      properties:
+        type:
+          type: string
+          format: uri
+          example: https://tiendinet.mx/problemas/producto-agotado
+        title:
+          type: string
+          example: Producto agotado
+        status:
+          type: integer
+          example: 409
+        detail:
+          type: string
+          description: Mensaje para el usuario, igual al del SRS.
+          example: Producto agotado
+        instance:
+          type: string
+          example: /api/v1/ventas
+        codigo:
+          type: string
+          description: Código estable para el frontend y las pruebas.
+          example: PRODUCTO_AGOTADO
+        errores:
+          type: array
+          items:
+            $ref: '#/components/schemas/ErrorCampo'
+        productosAgotados:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductoAgotadoDetalle'
+    ErrorCampo:
+      type: object
+      required:
+      - campo
+      - mensaje
+      properties:
+        campo:
+          type: string
+          example: precioVenta
+        mensaje:
+          type: string
+          example: Debe ser mayor o igual a 0
+    ProductoAgotadoDetalle:
+      type: object
+      required:
+      - productoId
+      - solicitada
+      - disponible
+      properties:
+        productoId:
+          type: integer
+        nombre:
+          type: string
+        solicitada:
+          type: integer
+        disponible:
+          type: integer
+    Paginacion:
+      type: object
+      required:
+      - pagina
+      - tamanoPagina
+      - totalElementos
+      - totalPaginas
+      properties:
+        pagina:
+          type: integer
+          minimum: 1
+        tamanoPagina:
+          type: integer
+        totalElementos:
+          type: integer
+        totalPaginas:
+          type: integer
+    Rol:
+      type: string
+      enum:
+      - DUENO
+      - EMPLEADO
+      - CLIENTE
+    OrigenPR:
+      type: string
+      enum:
+      - INICIAL
+      - CALCULADO
+      - MANUAL
+    TipoAlerta:
+      type: string
+      enum:
+      - REORDEN
+      - POR_CADUCAR
+      - CADUCADO
+    EstadoAlerta:
+      type: string
+      enum:
+      - ACTIVA
+      - RESUELTA
+    TipoProveedor:
+      type: string
+      enum:
+      - SINCRONIZADO
+      - MANUAL
+      - RUTA
+    OrigenOferta:
+      type: string
+      enum:
+      - SINCRONIZADA
+      - MANUAL
+    MetodoPago:
+      type: string
+      enum:
+      - EFECTIVO
+      - TARJETA_TERMINAL
+    EstadoVenta:
+      type: string
+      enum:
+      - COMPLETADA
+      - CANCELADA
+    Modalidad:
+      type: string
+      enum:
+      - RECOGER_EN_TIENDA
+      - ENVIO_A_DOMICILIO
+    EstadoPedido:
+      type: string
+      enum:
+      - PENDIENTE_DE_PAGO
+      - EXPIRADO
+      - PAGADO
+      - EN_PREPARACION
+      - ESPERANDO_RESPUESTA_CLIENTE
+      - LISTO_PARA_RECOGER
+      - LISTO_PARA_ENVIAR
+      - EN_CAMINO
+      - ENTREGADO
+      - NO_RECOGIDO
+      - CANCELADO
+    EstadoPago:
+      type: string
+      enum:
+      - PENDIENTE
+      - APROBADO
+      - RECHAZADO
+    EstadoReembolso:
+      type: string
+      enum:
+      - SOLICITADO
+      - CONFIRMADO
+      - FALLIDO
+    MotivoReembolso:
+      type: string
+      enum:
+      - CANCELACION_CLIENTE
+      - FALTANTE
+      - PAGO_SIN_EXISTENCIA
+      - NO_RECOGIDO
+    SesionCrear:
+      type: object
+      required:
+      - correo
+      - contrasena
+      properties:
+        correo:
+          type: string
+          format: email
+          example: duena@tiendinet.mx
+        contrasena:
+          type: string
+          format: password
+          minLength: 1
+    Sesion:
+      type: object
+      required:
+      - token
+      - tipo
+      - expiraEn
+      - usuario
+      properties:
+        token:
+          type: string
+          description: JWT con claims sub y rol
+        tipo:
+          type: string
+          enum:
+          - Bearer
+        expiraEn:
+          type: string
+          format: date-time
+        usuario:
+          $ref: '#/components/schemas/Usuario'
+    ClienteCrear:
+      type: object
+      required:
+      - nombre
+      - correo
+      - telefono
+      - contrasena
+      - direccion
+      - codigoPostal
+      - aceptaAvisoPrivacidad
+      properties:
+        nombre:
+          type: string
+          minLength: 2
+          maxLength: 120
+        correo:
+          type: string
+          format: email
+        telefono:
+          type: string
+          pattern: ^[0-9]{10}$
+          example: '2221234567'
+        contrasena:
+          type: string
+          format: password
+          minLength: 8
+          pattern: ^(?=.*[A-Za-z])(?=.*[0-9]).{8,}$
+        direccion:
+          type: string
+          minLength: 5
+          maxLength: 250
+        codigoPostal:
+          type: string
+          pattern: ^[0-9]{5}$
+          example: '72000'
+        aceptaAvisoPrivacidad:
+          type: boolean
+          enum:
+          - true
+    SolicitudRecuperacion:
+      type: object
+      required:
+      - correo
+      properties:
+        correo:
+          type: string
+          format: email
+    RestablecimientoContrasena:
+      type: object
+      required:
+      - token
+      - nuevaContrasena
+      properties:
+        token:
+          type: string
+          description: Token de un solo uso recibido por correo
+        nuevaContrasena:
+          type: string
+          format: password
+          minLength: 8
+          pattern: ^(?=.*[A-Za-z])(?=.*[0-9]).{8,}$
+    PerfilCliente:
+      type: object
+      required:
+      - telefono
+      - direccion
+      - codigoPostal
+      properties:
+        telefono:
+          type: string
+        direccion:
+          type: string
+        codigoPostal:
+          type: string
+    Usuario:
+      type: object
+      required:
+      - id
+      - nombre
+      - correo
+      - rol
+      - activo
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        nombre:
+          type: string
+        correo:
+          type: string
+          format: email
+        rol:
+          $ref: '#/components/schemas/Rol'
+        activo:
+          type: boolean
+        perfilCliente:
+          type: object
+          allOf:
+          - $ref: '#/components/schemas/PerfilCliente'
+          nullable: true
+    UsuarioCrear:
+      type: object
+      required:
+      - nombre
+      - correo
+      - rol
+      properties:
+        nombre:
+          type: string
+          minLength: 2
+        correo:
+          type: string
+          format: email
+        rol:
+          type: string
+          enum:
+          - DUENO
+          - EMPLEADO
+    UsuarioActualizar:
+      type: object
+      properties:
+        nombre:
+          type: string
+          minLength: 2
+        rol:
+          type: string
+          enum:
+          - DUENO
+          - EMPLEADO
+        activo:
+          type: boolean
+      minProperties: 1
+    Categoria:
+      type: object
+      required:
+      - id
+      - nombre
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        nombre:
+          type: string
+    CategoriaCrear:
+      type: object
+      required:
+      - nombre
+      properties:
+        nombre:
+          type: string
+          minLength: 2
+          maxLength: 60
+    Producto:
+      type: object
+      description: Vista de la tienda; nunca incluye costos (RD-06).
+      required:
+      - id
+      - nombre
+      - presentacion
+      - categoria
+      - precioVenta
+      - perecedero
+      - restringido
+      - activo
+      - existenciaFisica
+      - apartado
+      - disponible
+      - prVigente
+      - descuadre
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        codigoBarras:
+          type: string
+          pattern: ^[0-9]{13}$
+          example: '7501055300075'
+          nullable: true
+        nombre:
+          type: string
+          example: Aceite vegetal
+        presentacion:
+          type: string
+          example: 1 L
+        categoria:
+          $ref: '#/components/schemas/Categoria'
+        precioVenta:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+        perecedero:
+          type: boolean
+        restringido:
+          type: boolean
+        activo:
+          type: boolean
+        existenciaFisica:
+          type: integer
+          readOnly: true
+        apartado:
+          type: integer
+          readOnly: true
+        disponible:
+          type: integer
+          readOnly: true
+        prVigente:
+          type: integer
+          minimum: 0
+        descuadre:
+          type: boolean
+          readOnly: true
+        proveedorPreferidoId:
+          type: integer
+          nullable: true
+        diasEntregaRespaldo:
+          type: integer
+          minimum: 1
+          nullable: true
+    ProductoCrear:
+      type: object
+      required:
+      - nombre
+      - presentacion
+      - categoriaId
+      - precioVenta
+      - costoReferencia
+      - prInicial
+      - perecedero
+      - restringido
+      properties:
+        codigoBarras:
+          type: string
+          pattern: ^[0-9]{13}$
+          nullable: true
+        nombre:
+          type: string
+          minLength: 2
+          maxLength: 120
+        presentacion:
+          type: string
+          minLength: 1
+          maxLength: 60
+        categoriaId:
+          type: integer
+        precioVenta:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+        costoReferencia:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+        prInicial:
+          type: integer
+          minimum: 0
+        perecedero:
+          type: boolean
+        restringido:
+          type: boolean
+        diasEntregaRespaldo:
+          type: integer
+          minimum: 1
+          nullable: true
+    ProductoActualizar:
+      type: object
+      properties:
+        codigoBarras:
+          type: string
+          pattern: ^[0-9]{13}$
+          nullable: true
+        nombre:
+          type: string
+          minLength: 2
+          maxLength: 120
+        presentacion:
+          type: string
+        categoriaId:
+          type: integer
+        precioVenta:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+        costoReferencia:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+        perecedero:
+          type: boolean
+        restringido:
+          type: boolean
+        activo:
+          type: boolean
+        proveedorPreferidoId:
+          type: integer
+          nullable: true
+        diasEntregaRespaldo:
+          type: integer
+          minimum: 1
+          nullable: true
+      minProperties: 1
+    CostoProducto:
+      type: object
+      required:
+      - productoId
+      - costoReferencia
+      properties:
+        productoId:
+          type: integer
+        costoReferencia:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+        ultimoCostoLote:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+          nullable: true
+        margen:
+          type: number
+          description: Porcentaje
+    Lote:
+      type: object
+      description: El costo del lote solo se expone al Dueño vía /productos/{productoId}/costo.
+      required:
+      - id
+      - productoId
+      - proveedorId
+      - cantidadRecibida
+      - cantidadActual
+      - fechaRecepcion
+      - estadoCaducidad
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        productoId:
+          type: integer
+        proveedorId:
+          type: integer
+        cantidadRecibida:
+          type: integer
+          minimum: 1
+        cantidadActual:
+          type: integer
+          minimum: 0
+        fechaCaducidad:
+          type: string
+          format: date
+          nullable: true
+        fechaRecepcion:
+          type: string
+          format: date-time
+        estadoCaducidad:
+          type: string
+          enum:
+          - VIGENTE
+          - POR_CADUCAR
+          - CADUCADO
+    PuntoReorden:
+      type: object
+      required:
+      - productoId
+      - valor
+      - origen
+      - prInicial
+      - diasHistorial
+      - diasSeguridad
+      - origenDiasEntrega
+      properties:
+        productoId:
+          type: integer
+        valor:
+          type: integer
+          minimum: 0
+        origen:
+          $ref: '#/components/schemas/OrigenPR'
+        prInicial:
+          type: integer
+        prManual:
+          type: integer
+          nullable: true
+        prManualVigencia:
+          type: string
+          format: date
+          nullable: true
+        cdp:
+          type: number
+          nullable: true
+        diasHistorial:
+          type: integer
+        diasEntrega:
+          type: integer
+          nullable: true
+        origenDiasEntrega:
+          type: string
+          enum:
+          - OFERTA_PROVEEDOR_PREFERIDO
+          - RESPALDO
+          - SIN_DATO
+        diasSeguridad:
+          type: integer
+        mensaje:
+          type: string
+          nullable: true
+          enum:
+          - Historial insuficiente
+          - Sin proveedor con oferta vigente
+          - null
+    PuntoReordenActualizar:
+      type: object
+      description: prManual y prManualVigencia van juntos; null en ambos elimina el PR manual.
+      properties:
+        prInicial:
+          type: integer
+          minimum: 0
+        prManual:
+          type: integer
+          minimum: 0
+          nullable: true
+        prManualVigencia:
+          type: string
+          format: date
+          nullable: true
+      minProperties: 1
+    RecepcionCrear:
+      type: object
+      description: fechaCaducidad es obligatoria si el producto es perecedero (422). costoUnitario solo lo usa el
+        Dueño.
+      required:
+      - productoId
+      - proveedorId
+      - cantidad
+      properties:
+        productoId:
+          type: integer
+        proveedorId:
+          type: integer
+        cantidad:
+          type: integer
+          minimum: 1
+        fechaCaducidad:
+          type: string
+          format: date
+          nullable: true
+        costoUnitario:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+          nullable: true
+    AjusteCrear:
+      type: object
+      required:
+      - tipo
+      - productoId
+      - motivo
+      properties:
+        tipo:
+          type: string
+          enum:
+          - MERMA
+          - CONTEO
+        productoId:
+          type: integer
+        loteId:
+          type: integer
+          description: Obligatorio en MERMA
+        cantidad:
+          type: integer
+          minimum: 1
+          description: 'MERMA: unidades a descontar del lote'
+        conteoFisico:
+          type: integer
+          minimum: 0
+          description: 'CONTEO: existencia física contada'
+        motivo:
+          type: string
+          minLength: 3
+          maxLength: 200
+    Ajuste:
+      type: object
+      required:
+      - id
+      - tipo
+      - productoId
+      - cantidadAnterior
+      - cantidadNueva
+      - diferencia
+      - motivo
+      - usuarioId
+      - fechaHora
+      properties:
+        id:
+          type: integer
+        tipo:
+          type: string
+          enum:
+          - MERMA
+          - CONTEO
+        productoId:
+          type: integer
+        cantidadAnterior:
+          type: integer
+        cantidadNueva:
+          type: integer
+        diferencia:
+          type: integer
+        motivo:
+          type: string
+        usuarioId:
+          type: integer
+        fechaHora:
+          type: string
+          format: date-time
+    Alerta:
+      type: object
+      required:
+      - id
+      - tipo
+      - estado
+      - productoId
+      - nombreProducto
+      - disponible
+      - fechaCreacion
+      properties:
+        id:
+          type: integer
+        tipo:
+          $ref: '#/components/schemas/TipoAlerta'
+        estado:
+          $ref: '#/components/schemas/EstadoAlerta'
+        productoId:
+          type: integer
+        nombreProducto:
+          type: string
+        loteId:
+          type: integer
+          nullable: true
+        disponible:
+          type: integer
+        puntoReorden:
+          type: integer
+        cantidadSugerida:
+          type: integer
+        proveedorSugerido:
+          type: object
+          nullable: true
+          description: Solo para el Dueño
+          properties:
+            proveedorId:
+              type: integer
+            nombre:
+              type: string
+        fechaCreacion:
+          type: string
+          format: date-time
+        fechaResolucion:
+          type: string
+          format: date-time
+          nullable: true
+    Proveedor:
+      type: object
+      required:
+      - id
+      - nombre
+      - tipo
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        nombre:
+          type: string
+        tipo:
+          $ref: '#/components/schemas/TipoProveedor'
+    ProveedorCrear:
+      type: object
+      description: Los proveedores SINCRONIZADO se configuran en el despliegue, no por API.
+      required:
+      - nombre
+      - tipo
+      properties:
+        nombre:
+          type: string
+          minLength: 2
+          maxLength: 120
+        tipo:
+          type: string
+          enum:
+          - MANUAL
+          - RUTA
+    Sincronizacion:
+      type: object
+      required:
+      - id
+      - estado
+      - origen
+      - inicio
+      - proveedores
+      properties:
+        id:
+          type: integer
+        estado:
+          type: string
+          enum:
+          - EN_CURSO
+          - TERMINADA
+        origen:
+          type: string
+          enum:
+          - PROGRAMADA
+          - BAJO_DEMANDA
+        inicio:
+          type: string
+          format: date-time
+        fin:
+          type: string
+          format: date-time
+          nullable: true
+        proveedores:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResumenSincronizacionProveedor'
+    ResumenSincronizacionProveedor:
+      type: object
+      required:
+      - proveedorId
+      - proveedor
+      - registrosLeidos
+      - ofertasImportadas
+      - rechazos
+      properties:
+        proveedorId:
+          type: integer
+        proveedor:
+          type: string
+        registrosLeidos:
+          type: integer
+        ofertasImportadas:
+          type: integer
+        ofertasActualizadas:
+          type: integer
+        porVincular:
+          type: integer
+        rechazos:
+          type: array
+          items:
+            type: object
+            required:
+            - codigoProveedor
+            - motivo
+            properties:
+              codigoProveedor:
+                type: string
+              motivo:
+                type: string
+        error:
+          type: string
+          nullable: true
+          example: Error de conexión con Proveedor B
+    ProductoPorVincular:
+      type: object
+      required:
+      - id
+      - proveedorId
+      - codigoProveedor
+      - nombre
+      - presentacion
+      - fechaDeteccion
+      properties:
+        id:
+          type: integer
+        proveedorId:
+          type: integer
+        codigoProveedor:
+          type: string
+        nombre:
+          type: string
+        presentacion:
+          type: string
+        fechaDeteccion:
+          type: string
+          format: date-time
+    VinculacionCrear:
+      oneOf:
+      - type: object
+        required:
+        - productoId
+        properties:
+          productoId:
+            type: integer
+        additionalProperties: false
+      - type: object
+        required:
+        - nuevoProducto
+        properties:
+          nuevoProducto:
+            $ref: '#/components/schemas/ProductoCrear'
+        additionalProperties: false
+    Oferta:
+      type: object
+      required:
+      - id
+      - proveedorId
+      - proveedor
+      - productoId
+      - origen
+      - presentacion
+      - factorConversion
+      - costo
+      - costoPorUnidadBase
+      - existenciaProveedor
+      - diasEntrega
+      - fechaActualizacion
+      - vigente
+      - etiquetas
+      properties:
+        id:
+          type: integer
+        proveedorId:
+          type: integer
+        proveedor:
+          type: string
+        productoId:
+          type: integer
+        origen:
+          $ref: '#/components/schemas/OrigenOferta'
+        codigoProveedor:
+          type: string
+          nullable: true
+        presentacion:
+          type: string
+          example: Caja de 12
+        factorConversion:
+          type: integer
+          minimum: 1
+        costo:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+        costoPorUnidadBase:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+        existenciaProveedor:
+          type: integer
+          minimum: 0
+        diasEntrega:
+          type: integer
+          minimum: 1
+        fechaActualizacion:
+          type: string
+          format: date-time
+        vigente:
+          type: boolean
+        etiquetas:
+          type: array
+          items:
+            type: string
+            enum:
+            - MENOR_COSTO
+            - ENTREGA_MAS_RAPIDA
+    OfertaManualCrear:
+      type: object
+      required:
+      - proveedorId
+      - productoId
+      - presentacion
+      - factorConversion
+      - costo
+      - existenciaProveedor
+      - diasEntrega
+      properties:
+        proveedorId:
+          type: integer
+        productoId:
+          type: integer
+        presentacion:
+          type: string
+        factorConversion:
+          type: integer
+          minimum: 1
+        costo:
+          type: number
+          exclusiveMinimum: true
+          minimum: 0
+        existenciaProveedor:
+          type: integer
+          minimum: 0
+        diasEntrega:
+          type: integer
+          minimum: 1
+    OfertaActualizar:
+      type: object
+      properties:
+        presentacion:
+          type: string
+        factorConversion:
+          type: integer
+          minimum: 1
+        costo:
+          type: number
+          exclusiveMinimum: true
+          minimum: 0
+        existenciaProveedor:
+          type: integer
+          minimum: 0
+        diasEntrega:
+          type: integer
+          minimum: 1
+      minProperties: 1
+    ComparacionOfertas:
+      type: object
+      required:
+      - productoId
+      - ofertas
+      properties:
+        productoId:
+          type: integer
+        ofertas:
+          type: array
+          items:
+            $ref: '#/components/schemas/Oferta'
+        mensaje:
+          type: string
+          nullable: true
+          example: Solo un proveedor ofrece este producto
+    SugerenciaProveedor:
+      type: object
+      required:
+      - productoId
+      - urgente
+      - cantidadSugerida
+      - criterio
+      properties:
+        productoId:
+          type: integer
+        urgente:
+          type: boolean
+        cantidadSugerida:
+          type: integer
+        oferta:
+          type: object
+          allOf:
+          - $ref: '#/components/schemas/Oferta'
+          nullable: true
+        criterio:
+          type: string
+          enum:
+          - MENOR_COSTO
+          - MENOS_DIAS_ENTREGA
+        mensaje:
+          type: string
+          nullable: true
+          example: Sin proveedor con existencia
+    PropuestaCompra:
+      type: object
+      required:
+      - id
+      - fechaCreacion
+      - renglones
+      - costoTotal
+      properties:
+        id:
+          type: integer
+        fechaCreacion:
+          type: string
+          format: date-time
+        renglones:
+          type: array
+          items:
+            $ref: '#/components/schemas/RenglonPropuesta'
+        costoTotal:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+    RenglonPropuesta:
+      type: object
+      required:
+      - productoId
+      - nombreProducto
+      - cantidad
+      properties:
+        productoId:
+          type: integer
+        nombreProducto:
+          type: string
+        cantidad:
+          type: integer
+          minimum: 1
+        proveedorId:
+          type: integer
+          nullable: true
+        costoUnitario:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+          nullable: true
+    RenglonPropuestaEntrada:
+      type: object
+      required:
+      - productoId
+      - cantidad
+      properties:
+        productoId:
+          type: integer
+        cantidad:
+          type: integer
+          minimum: 1
+        proveedorId:
+          type: integer
+          nullable: true
+    RenglonVentaEntrada:
+      type: object
+      required:
+      - productoId
+      - cantidad
+      properties:
+        productoId:
+          type: integer
+        cantidad:
+          type: integer
+          minimum: 1
+    VentaCrear:
+      type: object
+      description: montoRecibido es obligatorio con EFECTIVO y debe ser ≥ total (422 con el faltante). fechaHoraReal
+        solo para ventas diferidas (máximo 3 días atrás, no futura).
+      required:
+      - renglones
+      - metodoPago
+      properties:
+        renglones:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/RenglonVentaEntrada'
+        metodoPago:
+          $ref: '#/components/schemas/MetodoPago'
+        montoRecibido:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+          nullable: true
+        fechaHoraReal:
+          type: string
+          format: date-time
+          nullable: true
+    RenglonVenta:
+      type: object
+      required:
+      - productoId
+      - nombreProducto
+      - cantidad
+      - precioUnitario
+      - subtotal
+      properties:
+        productoId:
+          type: integer
+        nombreProducto:
+          type: string
+        cantidad:
+          type: integer
+        precioUnitario:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+        subtotal:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+    Venta:
+      type: object
+      description: Comprobante no fiscal.
+      required:
+      - folio
+      - estado
+      - fechaHora
+      - fechaCaptura
+      - diferida
+      - usuario
+      - renglones
+      - total
+      - metodoPago
+      properties:
+        folio:
+          type: integer
+        estado:
+          $ref: '#/components/schemas/EstadoVenta'
+        fechaHora:
+          type: string
+          format: date-time
+        fechaCaptura:
+          type: string
+          format: date-time
+        diferida:
+          type: boolean
+        usuario:
+          type: object
+          required:
+          - id
+          - nombre
+          properties:
+            id:
+              type: integer
+            nombre:
+              type: string
+        renglones:
+          type: array
+          items:
+            $ref: '#/components/schemas/RenglonVenta'
+        total:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+        metodoPago:
+          $ref: '#/components/schemas/MetodoPago'
+        montoRecibido:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+          nullable: true
+        cambio:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+          nullable: true
+        corteId:
+          type: integer
+          nullable: true
+        descuadre:
+          type: boolean
+          description: true si la venta diferida excedió la disponible
+        cancelacion:
+          type: object
+          allOf:
+          - $ref: '#/components/schemas/Cancelacion'
+          nullable: true
+    CancelacionCrear:
+      type: object
+      required:
+      - motivo
+      properties:
+        motivo:
+          type: string
+          minLength: 3
+          maxLength: 200
+    Cancelacion:
+      type: object
+      required:
+      - motivo
+      - usuario
+      - fechaHora
+      properties:
+        motivo:
+          type: string
+        usuario:
+          type: object
+          properties:
+            id:
+              type: integer
+            nombre:
+              type: string
+        fechaHora:
+          type: string
+          format: date-time
+    CorteActual:
+      type: object
+      required:
+      - ventasEfectivo
+      - efectivoEsperado
+      - ventasTarjeta
+      - totalTarjeta
+      properties:
+        ventasEfectivo:
+          type: integer
+        efectivoEsperado:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+        ventasTarjeta:
+          type: integer
+        totalTarjeta:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+        desde:
+          type: string
+          format: date-time
+          nullable: true
+    CorteCrear:
+      type: object
+      required:
+      - efectivoContado
+      properties:
+        efectivoContado:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+    Corte:
+      type: object
+      required:
+      - id
+      - fechaHora
+      - usuario
+      - efectivoEsperado
+      - efectivoContado
+      - diferencia
+      - totalTarjeta
+      - numeroVentas
+      properties:
+        id:
+          type: integer
+        fechaHora:
+          type: string
+          format: date-time
+        usuario:
+          type: object
+          properties:
+            id:
+              type: integer
+            nombre:
+              type: string
+        efectivoEsperado:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+        efectivoContado:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+        diferencia:
+          type: number
+          example: -20.0
+        totalTarjeta:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+        numeroVentas:
+          type: integer
+    ProductoCatalogo:
+      type: object
+      description: 'Proyección pública: sin costos, existencia exacta ni proveedor.'
+      required:
+      - id
+      - nombre
+      - presentacion
+      - categoria
+      - precio
+      - disponibilidad
+      - perecedero
+      properties:
+        id:
+          type: integer
+        nombre:
+          type: string
+        presentacion:
+          type: string
+        categoria:
+          $ref: '#/components/schemas/Categoria'
+        precio:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+        disponibilidad:
+          type: string
+          enum:
+          - DISPONIBLE
+          - AGOTADO
+        perecedero:
+          type: boolean
+    CantidadCarrito:
+      type: object
+      required:
+      - cantidad
+      properties:
+        cantidad:
+          type: integer
+          minimum: 1
+    RenglonCarrito:
+      type: object
+      required:
+      - productoId
+      - nombre
+      - cantidad
+      - precioUnitario
+      - subtotal
+      - disponibilidad
+      properties:
+        productoId:
+          type: integer
+        nombre:
+          type: string
+        presentacion:
+          type: string
+        cantidad:
+          type: integer
+        precioUnitario:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+        subtotal:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+        disponibilidad:
+          type: string
+          enum:
+          - DISPONIBLE
+          - AGOTADO
+    Carrito:
+      type: object
+      required:
+      - renglones
+      - subtotal
+      properties:
+        renglones:
+          type: array
+          items:
+            $ref: '#/components/schemas/RenglonCarrito'
+        subtotal:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+    PedidoCrear:
+      type: object
+      description: Los renglones salen del carrito del cliente. Con ENVIO_A_DOMICILIO, dirección y código postal
+        son obligatorios; si se omiten se usan los del perfil.
+      required:
+      - modalidad
+      properties:
+        modalidad:
+          $ref: '#/components/schemas/Modalidad'
+        direccionEntrega:
+          type: string
+          minLength: 5
+          nullable: true
+        codigoPostal:
+          type: string
+          pattern: ^[0-9]{5}$
+          nullable: true
+    RenglonPedido:
+      type: object
+      required:
+      - id
+      - productoId
+      - nombreProducto
+      - cantidad
+      - precioUnitario
+      - subtotal
+      - cantidadApartada
+      - cantidadFaltante
+      properties:
+        id:
+          type: integer
+        productoId:
+          type: integer
+        nombreProducto:
+          type: string
+        cantidad:
+          type: integer
+        precioUnitario:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+        subtotal:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+        cantidadApartada:
+          type: integer
+        cantidadFaltante:
+          type: integer
+        sustituyeARenglonId:
+          type: integer
+          nullable: true
+    ContactoCliente:
+      type: object
+      required:
+      - nombre
+      - telefono
+      properties:
+        nombre:
+          type: string
+        telefono:
+          type: string
+        direccion:
+          type: string
+          nullable: true
+    Pedido:
+      type: object
+      description: '`contacto` solo aparece para la tienda en EN_PREPARACION, LISTO_PARA_RECOGER, LISTO_PARA_ENVIAR
+        o EN_CAMINO (RNF-10).'
+      required:
+      - folio
+      - estado
+      - modalidad
+      - fechaCreacion
+      - pagoVenceEn
+      - renglones
+      - subtotal
+      - costoEnvio
+      - total
+      - totalReembolsado
+      properties:
+        folio:
+          type: integer
+        estado:
+          $ref: '#/components/schemas/EstadoPedido'
+        modalidad:
+          $ref: '#/components/schemas/Modalidad'
+        fechaCreacion:
+          type: string
+          format: date-time
+        pagoVenceEn:
+          type: string
+          format: date-time
+        fechaProgramada:
+          type: string
+          format: date
+          nullable: true
+        ventanaEntrega:
+          type: string
+          nullable: true
+          example: 'Entrega: mañana de 9:00 a 20:00'
+        renglones:
+          type: array
+          items:
+            $ref: '#/components/schemas/RenglonPedido'
+        subtotal:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+        costoEnvio:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+        total:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+        totalReembolsado:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+        direccionEntrega:
+          type: string
+          nullable: true
+        codigoPostal:
+          type: string
+          nullable: true
+        empleadoAsignado:
+          type: object
+          nullable: true
+          properties:
+            id:
+              type: integer
+            nombre:
+              type: string
+        respuestaFaltanteVenceEn:
+          type: string
+          format: date-time
+          nullable: true
+        contacto:
+          type: object
+          allOf:
+          - $ref: '#/components/schemas/ContactoCliente'
+          nullable: true
+    PedidoActualizar:
+      type: object
+      required:
+      - empleadoAsignadoId
+      properties:
+        empleadoAsignadoId:
+          type: integer
+    TransicionCrear:
+      type: object
+      required:
+      - estadoDestino
+      properties:
+        estadoDestino:
+          $ref: '#/components/schemas/EstadoPedido'
+        nota:
+          type: string
+          maxLength: 200
+          nullable: true
+    Transicion:
+      type: object
+      required:
+      - id
+      - estadoAnterior
+      - estadoNuevo
+      - fechaHora
+      properties:
+        id:
+          type: integer
+        estadoAnterior:
+          $ref: '#/components/schemas/EstadoPedido'
+        estadoNuevo:
+          $ref: '#/components/schemas/EstadoPedido'
+        fechaHora:
+          type: string
+          format: date-time
+        usuario:
+          type: object
+          nullable: true
+          description: null si la disparó el reloj
+          properties:
+            id:
+              type: integer
+            nombre:
+              type: string
+        nota:
+          type: string
+          nullable: true
+    FaltanteActualizar:
+      type: object
+      required:
+      - cantidadFaltante
+      properties:
+        cantidadFaltante:
+          type: integer
+          minimum: 1
+    RespuestaFaltante:
+      type: object
+      required:
+      - opcion
+      properties:
+        opcion:
+          type: string
+          enum:
+          - REEMBOLSO
+          - SUSTITUTO
+        sustitutoProductoId:
+          type: integer
+          nullable: true
+    Pago:
+      type: object
+      required:
+      - id
+      - folio
+      - estado
+      - monto
+      - fechaHora
+      properties:
+        id:
+          type: integer
+        folio:
+          type: integer
+        estado:
+          $ref: '#/components/schemas/EstadoPago'
+        monto:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+        referenciaServicio:
+          type: string
+          nullable: true
+        urlCheckout:
+          type: string
+          format: uri
+          nullable: true
+          description: Solo mientras el pago está PENDIENTE
+        fechaHora:
+          type: string
+          format: date-time
+    ResolucionCrear:
+      type: object
+      description: monto es obligatorio y ≤ pagado si tipo = PARCIAL (422).
+      required:
+      - tipo
+      properties:
+        tipo:
+          type: string
+          enum:
+          - TOTAL
+          - PARCIAL
+          - NINGUNO
+        monto:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+          nullable: true
+    Resolucion:
+      type: object
+      required:
+      - folio
+      - tipo
+      - monto
+      - usuario
+      - fechaHora
+      properties:
+        folio:
+          type: integer
+        tipo:
+          type: string
+          enum:
+          - TOTAL
+          - PARCIAL
+          - NINGUNO
+        monto:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+        usuario:
+          type: object
+          properties:
+            id:
+              type: integer
+            nombre:
+              type: string
+        fechaHora:
+          type: string
+          format: date-time
+        reembolsoId:
+          type: integer
+          nullable: true
+    Reembolso:
+      type: object
+      required:
+      - id
+      - folio
+      - pagoId
+      - monto
+      - motivo
+      - estado
+      - fechaHora
+      - intentos
+      properties:
+        id:
+          type: integer
+        folio:
+          type: integer
+        pagoId:
+          type: integer
+        monto:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+        motivo:
+          $ref: '#/components/schemas/MotivoReembolso'
+        estado:
+          $ref: '#/components/schemas/EstadoReembolso'
+        renglonId:
+          type: integer
+          nullable: true
+        fechaHora:
+          type: string
+          format: date-time
+        intentos:
+          type: integer
+    NotificacionMercadoPago:
+      type: object
+      description: Formato de Mercado Pago; solo se usa data.id para consultar el pago.
+      required:
+      - id
+      - type
+      - data
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          example: payment
+        action:
+          type: string
+          example: payment.updated
+        data:
+          type: object
+          required:
+          - id
+          properties:
+            id:
+              type: string
+    Configuracion:
+      type: object
+      required:
+      - diasSeguridad
+      - codigosPostales
+      - pedidoMinimoEnvio
+      - costoEnvio
+      - horaApertura
+      - horaCierre
+      - horaLimiteMismoDia
+      - diasAvisoCaducidad
+      - minutosRespuestaFaltante
+      properties:
+        diasSeguridad:
+          type: integer
+          minimum: 0
+          maximum: 14
+        codigosPostales:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            pattern: ^[0-9]{5}$
+        pedidoMinimoEnvio:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+        costoEnvio:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+        horaApertura:
+          type: string
+          pattern: ^([01][0-9]|2[0-3]):[0-5][0-9]$
+          example: '19:00'
+        horaCierre:
+          type: string
+          pattern: ^([01][0-9]|2[0-3]):[0-5][0-9]$
+          example: '19:00'
+        horaLimiteMismoDia:
+          type: string
+          pattern: ^([01][0-9]|2[0-3]):[0-5][0-9]$
+          example: '19:00'
+        diasAvisoCaducidad:
+          type: integer
+          minimum: 0
+          maximum: 30
+        minutosRespuestaFaltante:
+          type: integer
+          minimum: 5
+          maximum: 240
+    ConfiguracionActualizar:
+      type: object
+      properties:
+        diasSeguridad:
+          type: integer
+          minimum: 0
+          maximum: 14
+        codigosPostales:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            pattern: ^[0-9]{5}$
+        pedidoMinimoEnvio:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+        costoEnvio:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+        horaApertura:
+          type: string
+          pattern: ^([01][0-9]|2[0-3]):[0-5][0-9]$
+          example: '19:00'
+        horaCierre:
+          type: string
+          pattern: ^([01][0-9]|2[0-3]):[0-5][0-9]$
+          example: '19:00'
+        horaLimiteMismoDia:
+          type: string
+          pattern: ^([01][0-9]|2[0-3]):[0-5][0-9]$
+          example: '19:00'
+        diasAvisoCaducidad:
+          type: integer
+          minimum: 0
+          maximum: 30
+        minutosRespuestaFaltante:
+          type: integer
+          minimum: 5
+          maximum: 240
+      minProperties: 1
+    ImporteConteo:
+      type: object
+      required:
+      - numero
+      - importe
+      properties:
+        numero:
+          type: integer
+        importe:
+          type: number
+          format: double
+          minimum: 0
+          description: MXN con IVA, 2 decimales
+          example: 38.5
+    ReporteDiario:
+      type: object
+      required:
+      - fecha
+      - mostrador
+      - enLinea
+      - cancelaciones
+      - totalNeto
+      properties:
+        fecha:
+          type: string
+          format: date
+        mostrador:
+          $ref: '#/components/schemas/ImporteConteo'
+        enLinea:
+          $ref: '#/components/schemas/ImporteConteo'
+        cancelaciones:
+          $ref: '#/components/schemas/ImporteConteo'
+        totalNeto:
+          type: number
+          description: Importe completado − importe cancelado
+        mensaje:
+          type: string
+          nullable: true
+          example: No hay ventas en el periodo seleccionado
+    RenglonRotacion:
+      type: object
+      required:
+      - productoId
+      - nombre
+      - unidades
+      properties:
+        productoId:
+          type: integer
+        nombre:
+          type: string
+        unidades:
+          type: integer
+    Indicadores:
+      type: object
+      required:
+      - desde
+      - hasta
+      - faltantes
+      - diferenciaCaja
+      - pedidosPagados
+      properties:
+        desde:
+          type: string
+          format: date
+        hasta:
+          type: string
+          format: date
+        faltantes:
+          type: integer
+          description: Productos que llegaron a disponible 0 (S-10)
+        diferenciaCaja:
+          type: number
+          example: -45.0
+        pedidosPagados:
+          type: integer
+    EjecucionCrear:
+      type: object
+      description: 'Solo fuera de producción: simula la fecha y hora del proceso.'
+      properties:
+        fechaReferencia:
+          type: string
+          format: date-time
+          nullable: true
+    Ejecucion:
+      type: object
+      required:
+      - id
+      - proceso
+      - estado
+      - inicio
+      properties:
+        id:
+          type: integer
+        proceso:
+          type: string
+          enum:
+          - CADUCIDADES
+          - PUNTO_REORDEN
+          - EXPIRACION_PEDIDOS
+          - CONCILIACION_PAGOS
+          - NO_RECOGIDOS
+          - FALTANTES_VENCIDOS
+        estado:
+          type: string
+          enum:
+          - EN_CURSO
+          - TERMINADA
+          - FALLIDA
+        inicio:
+          type: string
+          format: date-time
+        fin:
+          type: string
+          format: date-time
+          nullable: true
+        elementosProcesados:
+          type: integer
+        resumen:
+          type: string
+          nullable: true
+    PaginaUsuario:
+      type: object
+      required:
+      - datos
+      - paginacion
+      properties:
+        datos:
+          type: array
+          items:
+            $ref: '#/components/schemas/Usuario'
+        paginacion:
+          $ref: '#/components/schemas/Paginacion'
+    PaginaProducto:
+      type: object
+      required:
+      - datos
+      - paginacion
+      properties:
+        datos:
+          type: array
+          items:
+            $ref: '#/components/schemas/Producto'
+        paginacion:
+          $ref: '#/components/schemas/Paginacion'
+    PaginaLote:
+      type: object
+      required:
+      - datos
+      - paginacion
+      properties:
+        datos:
+          type: array
+          items:
+            $ref: '#/components/schemas/Lote'
+        paginacion:
+          $ref: '#/components/schemas/Paginacion'
+    PaginaAlerta:
+      type: object
+      required:
+      - datos
+      - paginacion
+      properties:
+        datos:
+          type: array
+          items:
+            $ref: '#/components/schemas/Alerta'
+        paginacion:
+          $ref: '#/components/schemas/Paginacion'
+    PaginaSincronizacion:
+      type: object
+      required:
+      - datos
+      - paginacion
+      properties:
+        datos:
+          type: array
+          items:
+            $ref: '#/components/schemas/Sincronizacion'
+        paginacion:
+          $ref: '#/components/schemas/Paginacion'
+    PaginaProductoPorVincular:
+      type: object
+      required:
+      - datos
+      - paginacion
+      properties:
+        datos:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductoPorVincular'
+        paginacion:
+          $ref: '#/components/schemas/Paginacion'
+    PaginaVenta:
+      type: object
+      required:
+      - datos
+      - paginacion
+      properties:
+        datos:
+          type: array
+          items:
+            $ref: '#/components/schemas/Venta'
+        paginacion:
+          $ref: '#/components/schemas/Paginacion'
+    PaginaCorte:
+      type: object
+      required:
+      - datos
+      - paginacion
+      properties:
+        datos:
+          type: array
+          items:
+            $ref: '#/components/schemas/Corte'
+        paginacion:
+          $ref: '#/components/schemas/Paginacion'
+    PaginaProductoCatalogo:
+      type: object
+      required:
+      - datos
+      - paginacion
+      properties:
+        datos:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductoCatalogo'
+        paginacion:
+          $ref: '#/components/schemas/Paginacion'
+    PaginaPedido:
+      type: object
+      required:
+      - datos
+      - paginacion
+      properties:
+        datos:
+          type: array
+          items:
+            $ref: '#/components/schemas/Pedido'
+        paginacion:
+          $ref: '#/components/schemas/Paginacion'
+    PaginaReembolso:
+      type: object
+      required:
+      - datos
+      - paginacion
+      properties:
+        datos:
+          type: array
+          items:
+            $ref: '#/components/schemas/Reembolso'
+        paginacion:
+          $ref: '#/components/schemas/Paginacion'
+    PaginaRenglonRotacion:
+      type: object
+      required:
+      - datos
+      - paginacion
+      properties:
+        datos:
+          type: array
+          items:
+            $ref: '#/components/schemas/RenglonRotacion'
+        paginacion:
+          $ref: '#/components/schemas/Paginacion'

@@ -1,0 +1,129 @@
+' ============================================================
+' TiendiNet - Flujo 2: Pedido en línea con pago anticipado (Mercado Pago)
+' Endpoints: PUT /api/v1/carrito/renglones/{productoId}, POST /api/v1/pedidos,
+'            POST /api/v1/pedidos/{folio}/pagos, POST /api/v1/webhooks/mercado-pago,
+'            GET /api/v1/pedidos/{folio}  (openapi.yaml)
+' Criterios: RF-22-AC-1, RF-22-AC-2, RF-22-AC-3, RF-22-AC-5, RF-22-AC-7,
+'            RF-23-AC-1, RF-23-AC-4, RF-23-AC-5, RF-23-AC-6, RF-23-AC-7, RF-09-AC-2, RNF-06
+' Render: java -jar plantuml.jar -tpng secuencia_flujo2.puml
+' ============================================================
+@startuml secuencia_flujo2
+title Flujo 2 - Pedido en línea con apartado de 15 min y pago confirmado por webhook
+
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam sequenceMessageAlign left
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 12
+skinparam BoxPadding 8
+autonumber "<b>[0]"
+
+actor "Cliente\n(navegador del celular)" as cli
+box "Frontend" #F3F7FD
+  participant "Portal Clientes\n(React SPA)" as spa
+end box
+box "Backend (contenedor api)" #F4FBF4
+  participant "API REST\n(Seguridad + routers)" as api
+  participant "ServicioPedidos\n/ ServicioPagos" as svc
+end box
+database "PostgreSQL\n(BD concentradora)" as bd
+participant "Mercado Pago\n(sandbox)" as mp #FFF3E0
+
+== Agregar al carrito (RF-22-AC-5) ==
+cli -> spa : Agrega 6 "Leche entera 1 L"
+spa -> api : PUT /api/v1/carrito/renglones/31\nAuthorization: Bearer <JWT cliente>\n{cantidad: 6}
+api -> bd : SELECT disponible del producto 31
+bd --> api : 12
+alt cantidad > disponible
+  api --> spa : <b>409</b> problem+json "Solo hay N disponibles"
+else hay disponible
+  api -> bd : UPSERT carrito_renglon (fija la cantidad, idempotente)
+  api --> spa : <b>200 OK</b> Carrito {renglones, subtotal 174.00}
+end
+
+== Crear pedido y apartar (RF-22-AC-1, AC-2) ==
+cli -> spa : Elige "Envío a domicilio" y confirma
+spa -> api : POST /api/v1/pedidos\nIdempotency-Key: 9b2e…\n{modalidad: ENVIO_A_DOMICILIO, codigoPostal: "72000"}
+api -> svc : crearPedido(PedidoCrear, cliente)
+svc -> bd : SELECT configuracion, carrito
+bd --> svc : CP atendidos, mínimo $150, envío $25
+alt CP no atendido o subtotal < mínimo (RF-22-AC-3, AC-4)
+  svc --> spa : <b>422</b> problem+json "El pedido mínimo para envío es de $150"
+else válido
+  svc -> bd : BEGIN
+  svc -> bd : SELECT … FROM producto WHERE id IN (…) ORDER BY id FOR UPDATE
+  svc -> bd : SELECT disponible por producto
+  alt algún producto ya no alcanza
+    svc -> bd : ROLLBACK
+    svc --> spa : <b>409</b> problem+json PRODUCTO_AGOTADO
+  else hay disponible
+    svc -> bd : INSERT pedido (PENDIENTE_DE_PAGO, costoEnvio 25.00,\npagoVenceEn = ahora + 15 min)
+    svc -> bd : INSERT renglon_pedido (cantidadApartada = cantidad)
+    svc -> bd : INSERT cambio_estado_pedido, registro_auditoria
+    svc -> bd : DELETE carrito_renglon del cliente
+    svc -> bd : COMMIT
+    svc --> spa : <b>201 Created</b> Location: /api/v1/pedidos/2087\n{folio 2087, total 199.00, PENDIENTE_DE_PAGO}
+  end
+end
+
+== Iniciar pago (RF-23-AC-7: solo pago en línea) ==
+spa -> api : POST /api/v1/pedidos/2087/pagos\nIdempotency-Key: c41a…
+api -> svc : iniciarPago(2087)
+svc -> mp : POST /checkout/preferences\n{external_reference: 2087, monto 199.00,\n notification_url: …/api/v1/webhooks/mercado-pago}
+mp --> svc : {id, init_point}
+svc -> bd : INSERT pago (PENDIENTE, monto 199.00)
+svc --> spa : <b>201 Created</b> {estado PENDIENTE, urlCheckout}
+spa -> cli : Redirige a Checkout Pro
+cli -> mp : Paga con tarjeta de prueba
+
+== Confirmación por webhook (RF-23-AC-1) ==
+mp -> api : POST /api/v1/webhooks/mercado-pago\nx-signature: ts=…,v1=…  {type: payment, data: {id: 9911}}
+alt firma inválida (RF-23-AC-5)
+  api --> mp : <b>401</b> problem+json FIRMA_INVALIDA
+else firma válida
+  api -> svc : procesarNotificacion(9911)
+  svc -> bd : SELECT notificacion_procesada WHERE id = :id
+  alt notificación duplicada (RF-23-AC-5)
+    svc --> mp : <b>200 OK</b> (sin cambios ni segundo correo)
+  else nueva
+    svc -> mp : GET /v1/payments/9911
+    mp --> svc : {status, transaction_amount, external_reference 2087}
+    svc -> bd : BEGIN
+    svc -> bd : SELECT pedido 2087 FOR UPDATE
+    alt status = approved y monto = total
+      svc -> bd : UPDATE pago APROBADO (referenciaServicio 9911)
+      svc -> bd : UPDATE pedido PAGADO, fechaProgramada\n(pagado después de 19:00 → mañana, RF-22-AC-7)
+      svc -> bd : INSERT cambio_estado_pedido (usuario null)
+      opt disponible <= PR (RF-09-AC-2)
+        svc -> bd : INSERT/UPDATE alerta REORDEN
+      end
+      svc -> bd : INSERT correo_pendiente (confirmación al cliente)
+    else status = approved y monto distinto (RF-23-AC-6)
+      svc -> bd : INSERT alerta "Monto de pago no coincide" (pedido sin cambio)
+    else status = rejected (RF-23-AC-4)
+      svc -> bd : UPDATE pago RECHAZADO (pedido sigue PENDIENTE_DE_PAGO)
+    end
+    svc -> bd : INSERT notificacion_procesada, registro_auditoria
+    svc -> bd : COMMIT
+    svc --> mp : <b>200 OK</b>
+  end
+end
+
+== Regreso al portal ==
+mp -> cli : Redirige a back_url del portal
+cli -> spa : Abre /pedidos/2087
+spa -> api : GET /api/v1/pedidos/2087\nAuthorization: Bearer <JWT cliente>
+api -> bd : SELECT pedido 2087 WHERE cliente = :sub
+alt pedido de otro cliente (RF-26-AC-4)
+  api --> spa : <b>404</b> problem+json NO_ENCONTRADO
+else pedido propio
+  bd --> api : PAGADO, fechaProgramada
+  api --> spa : <b>200 OK</b> Pedido {estado PAGADO,\nventanaEntrega "Entrega: mañana de 9:00 a 20:00"}
+  spa --> cli : Muestra el estado y la fecha de entrega
+end
+note over spa, api
+  Si el webhook aún no llega, el portal ve PENDIENTE_DE_PAGO y consulta de nuevo.
+  Si nunca llega, la conciliación del worker (cada 10 min) aplica el mismo
+  procesarNotificacion (RF-23-AC-3). El pedido nunca pasa a PAGADO por la redirección.
+end note
+@enduml
