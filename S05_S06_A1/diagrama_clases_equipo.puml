@@ -1,0 +1,664 @@
+@startuml TiendiNet_Diagrama_Clases_Equipo
+' Modelo de dominio consolidado del equipo.
+' Los atributos usan los nombres de los schemas de openapi_equipo.yaml.
+' passwordHash y RegistroAuditoria vienen del SRS §3.5: no hay schema de respuesta.
+' La comparación está en diferencias_clases.md.
+' Integra los diagramas de Adrián, Ángel, Víctor y José.
+' Ajustado en la Parte 1 al generar esquema_bd.sql (ver revision_sql.md):
+'   TokenCuenta, IntentoInicioSesion y RegistroIdempotencia nuevas;
+'   RenglonPropuesta.proveedorId opcional; precio y subtotales del carrito
+'   derivados; Venta.usuarioResponsableId obligatorio; auditoría en JSON.
+
+title TiendiNet — Diagrama de clases del equipo
+
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+skinparam shadowing false
+skinparam linetype polyline
+hide empty members
+
+together {
+  package "acceso" {
+    abstract class Usuario {
+      +id: UUID
+      +nombre: String
+      +correo: String
+      -passwordHash: String [0..1]
+      +estado: EstadoUsuario
+    }
+
+    class UsuarioTienda {
+      +rol: RolTienda
+      +activacionEnviada: Boolean
+      +puedeVerCostos(): Boolean
+    }
+
+    class Cliente {
+      +telefono: String
+      +direccion: Direccion
+      +avisoPrivacidadAceptado: Boolean
+    }
+
+    class Direccion <<value>> {
+      +calle: String
+      +codigoPostal: String
+    }
+
+    enum EstadoUsuario {
+      ACTIVO
+      INACTIVO
+    }
+
+    enum RolTienda {
+      DUENO
+      EMPLEADO
+    }
+
+    class TokenCuenta {
+      +id: UUID
+      +proposito: PropositoToken
+      -tokenHash: String
+      +creadoEn: DateTime
+      +expiraEn: DateTime
+      +usadoEn: DateTime [0..1]
+    }
+
+    enum PropositoToken {
+      ACTIVACION
+      RECUPERACION
+    }
+
+    class IntentoInicioSesion {
+      +correo: String
+      +ip: String
+      +exitoso: Boolean
+      +fechaHora: DateTime
+    }
+  }
+
+  package "administracion" {
+    class ConfiguracionTienda {
+      +diasSeguridad: Integer
+      +pedidoMinimoEnvio: Decimal
+      +costoEnvio: Decimal
+      +horarioInicio: Hora
+      +horarioFin: Hora
+      +horaLimiteMismoDia: Hora
+      +diasAvisoCaducidad: Integer
+      +plazoRespuestaFaltanteMin: Integer
+      +/codigosPostalesEntrega: String[*]
+    }
+
+    class CodigoPostalEntrega {
+      +codigo: String
+      +activo: Boolean
+    }
+
+    class RegistroAuditoria {
+      +id: UUID
+      +fechaHora: DateTime
+      +operacion: String
+      +entidad: String
+      +entidadId: String
+      +valorAnterior: JSON [0..1]
+      +valorNuevo: JSON [0..1]
+      +resultado: String
+    }
+
+    class RegistroIdempotencia {
+      +clave: UUID
+      +operacion: String
+      -hashCuerpo: String
+      +estado: EstadoIdempotencia
+      +codigoRespuesta: Integer [0..1]
+      +cuerpoRespuesta: JSON [0..1]
+      +creadaEn: DateTime
+      +expiraEn: DateTime
+    }
+
+    enum EstadoIdempotencia {
+      EN_PROCESO
+      COMPLETADA
+    }
+  }
+}
+
+package "inventario" {
+  class Producto {
+    +id: UUID
+    +codigoInterno: String
+    +codigoBarras: String [0..1]
+    +nombre: String
+    +presentacion: String
+    +categoria: String
+    +precioVenta: Decimal
+    +costoReferencia: Decimal
+    +prInicial: Integer
+    +prVigente: Integer
+    +origenPR: OrigenPR
+    +prManual: Integer [0..1]
+    +vigenciaPRManual: Date [0..1]
+    +diasEntregaRespaldo: Integer [0..1]
+    +proveedorPreferidoId: UUID [0..1]
+    +perecedero: Boolean
+    +restringido: Boolean
+    +estado: EstadoProducto
+    +marcaDescuadre: Boolean
+    +/existenciaFisica: Integer
+    +/apartado: Integer
+    +/existenciaDisponible: Integer
+    +/cdp: Decimal [0..1]
+    +/diasHistorial: Integer
+    +/diasEntregaUsados: Integer [0..1]
+    +/origenDiasEntrega: OrigenDiasEntrega [0..1]
+    +/diasSeguridad: Integer
+    +/mensaje: String [0..1]
+  }
+
+  enum EstadoProducto {
+    ACTIVO
+    INACTIVO
+  }
+
+  enum OrigenPR {
+    INICIAL
+    CALCULADO
+    MANUAL
+  }
+
+  enum OrigenDiasEntrega {
+    OFERTA_PREFERIDO
+    RESPALDO
+    NINGUNO
+  }
+
+  class Lote {
+    +id: UUID
+    +productoId: UUID
+    +cantidad: Integer
+    +fechaCaducidad: Date [0..1]
+    +costoUnitario: Decimal [0..1]
+    +proveedorId: UUID [0..1]
+    +ofertaId: UUID [0..1]
+    +recibidoEn: DateTime
+    +/caducado: Boolean
+  }
+
+  class MovimientoInventario {
+    +id: UUID
+    +tipo: TipoMovimiento
+    +productoId: UUID
+    +loteId: UUID [0..1]
+    +cantidad: Integer
+    +cantidadAnterior: Integer
+    +cantidadNueva: Integer
+    +motivo: String [0..1]
+    +usuarioId: UUID
+    +fechaHora: DateTime
+  }
+
+  enum TipoMovimiento {
+    RECEPCION
+    VENTA
+    MERMA
+    CONTEO
+    CANCELACION
+    ENTREGA_PEDIDO
+  }
+
+  class Recepcion {
+    +id: UUID
+    +productoId: UUID
+    +proveedorId: UUID
+    +cantidad: Integer
+    +existenciaFisica: Integer
+    +existenciaDisponible: Integer
+    +costoIgnorado: Boolean
+    +movimientoId: UUID
+  }
+
+  class Ajuste {
+    +id: UUID
+    +tipo: TipoAjuste
+    +productoId: UUID
+    +loteId: UUID [0..1]
+    +cantidadAnterior: Integer
+    +cantidadNueva: Integer
+    +delta: Integer
+    +motivo: String
+    +cuentaParaCdp: Boolean
+    +marcaDescuadre: Boolean
+    +usuarioId: UUID
+    +fechaHora: DateTime
+  }
+
+  enum TipoAjuste {
+    MERMA
+    CONTEO
+  }
+
+  class Alerta {
+    +id: UUID
+    +tipo: TipoAlerta
+    +estado: EstadoAlerta
+    +productoId: UUID [0..1]
+    +loteId: UUID [0..1]
+    +existenciaDisponible: Integer [0..1]
+    +puntoReorden: Integer [0..1]
+    +cantidadSugerida: Integer [0..1]
+    +proveedorSugeridoId: UUID [0..1]
+    +fecha: DateTime
+  }
+
+  enum TipoAlerta {
+    REORDEN
+    CADUCIDAD
+  }
+
+  enum EstadoAlerta {
+    ACTIVA
+    RESUELTA
+  }
+}
+
+package "proveedores" {
+  class Proveedor {
+    +id: UUID
+    +nombre: String
+    +tipo: TipoProveedor
+    +activo: Boolean
+  }
+
+  enum TipoProveedor {
+    CON_BD
+    MANUAL_RUTA
+    OTRO_RUTA
+  }
+
+  class Oferta {
+    +id: UUID
+    +proveedorId: UUID
+    +productoId: UUID [0..1]
+    +origen: OrigenOferta
+    +codigoProveedor: String [0..1]
+    +presentacion: String
+    +factorConversion: Integer
+    +costo: Decimal
+    +/costoPorUnidadBase: Decimal
+    +existenciaProveedor: Integer
+    +diasEntrega: Integer
+    +fechaActualizacion: DateTime
+    +/vigente: Boolean
+  }
+
+  enum OrigenOferta {
+    SINCRONIZADA
+    MANUAL
+  }
+
+  class Sincronizacion {
+    +id: UUID
+    +ejecutadaEn: DateTime
+    +preciosVentaModificados: Integer
+  }
+
+  class ResultadoProveedorSync {
+    +proveedorId: UUID
+    +ofertasCargadas: Integer
+    +ofertasRechazadas: Integer
+    +errorConexion: String [0..1]
+    +ofertasPreviasConservadas: Boolean
+  }
+
+  class RechazoOferta {
+    +codigo: String
+    +motivo: String
+  }
+
+  class VinculacionPendiente {
+    +id: UUID
+    +proveedorId: UUID
+    +codigoProveedor: String
+    +nombre: String
+    +presentacion: String
+    +factorConversion: Integer
+    +costo: Decimal
+    +existenciaProveedor: Integer
+    +diasEntrega: Integer
+  }
+
+  class PropuestaCompra {
+    +id: UUID
+    +creadaEn: DateTime
+    +inventarioModificado: Boolean
+    +enviadaAlProveedor: Boolean
+  }
+
+  class RenglonPropuesta {
+    +id: UUID
+    +productoId: UUID
+    +cantidadSugerida: Integer
+    +cantidadConfirmada: Integer
+    +proveedorId: UUID [0..1]
+    +costoEstimado: Decimal
+  }
+}
+
+package "pos" {
+  class Venta {
+    +id: UUID
+    +folio: String [0..1]
+    +estado: EstadoVenta
+    +diferida: Boolean
+    +formaPago: FormaPago [0..1]
+    +total: Decimal
+    +montoRecibido: Decimal [0..1]
+    +cambio: Decimal [0..1]
+    +usuarioResponsableId: UUID
+    +fechaHora: DateTime [0..1]
+    +corteId: UUID [0..1]
+  }
+
+  enum EstadoVenta {
+    BORRADOR
+    COMPLETADA
+    CANCELADA
+  }
+
+  enum FormaPago {
+    EFECTIVO
+    TARJETA_TERMINAL
+  }
+
+  class RenglonVenta {
+    +id: UUID
+    +productoId: UUID
+    +cantidad: Integer
+    +precioUnitario: Decimal
+    +subtotal: Decimal
+  }
+
+  class SalidaLote {
+    +cantidad: Integer
+  }
+
+  class CancelacionVenta <<value>> {
+    +motivo: String
+    +usuarioId: UUID
+    +fechaHora: DateTime
+  }
+
+  class Descuadre {
+    +productoId: UUID
+    +solicitado: Integer
+    +descontado: Integer
+    +disponibleAntes: Integer
+  }
+
+  class CorteCaja {
+    +id: UUID
+    +fecha: Date
+    +fechaHora: DateTime
+    +usuarioId: UUID
+    +efectivoEsperado: Decimal
+    +efectivoContado: Decimal
+    +diferencia: Decimal
+    +totalTarjeta: Decimal
+    +ventasEnLineaExcluidas: Boolean
+  }
+}
+
+package "pedidos" {
+  class Carrito {
+    +/subtotal: Decimal
+  }
+
+  class RenglonCarrito {
+    +id: UUID
+    +productoId: UUID
+    +cantidad: Integer
+    +/precioUnitario: Decimal
+    +/subtotal: Decimal
+  }
+
+  class Pedido {
+    +id: UUID
+    +folio: String
+    +clienteId: UUID
+    +subtotal: Decimal
+    +modalidad: ModalidadPedido
+    +direccion: String [0..1]
+    +codigoPostal: String [0..1]
+    +costoEnvio: Decimal
+    +total: Decimal
+    +estado: EstadoPedido
+    +empleadoAsignadoId: UUID [0..1]
+    +fechaEntregaORecoleccion: Date [0..1]
+    +leyendaEntrega: String [0..1]
+    +expiraPagoEn: DateTime [0..1]
+  }
+
+  enum ModalidadPedido {
+    RECOGER_TIENDA
+    ENVIO_DOMICILIO
+  }
+
+  enum EstadoPedido {
+    PENDIENTE_PAGO
+    PAGADO
+    EXPIRADO
+    EN_PREPARACION
+    ESPERANDO_RESPUESTA_CLIENTE
+    LISTO_PARA_RECOGER
+    LISTO_PARA_ENVIAR
+    EN_CAMINO
+    ENTREGADO
+    NO_RECOGIDO
+    CANCELADO
+  }
+
+  class RenglonPedido {
+    +id: UUID
+    +productoId: UUID
+    +cantidad: Integer
+    +precioUnitario: Decimal
+    +cantidadApartada: Integer
+    +cantidadFaltante: Integer
+    +subtotal: Decimal
+    +productoSustitutoId: UUID [0..1]
+  }
+
+  class HistorialEstadoPedido {
+    +estado: EstadoPedido
+    +usuarioId: UUID [0..1]
+    +fechaHora: DateTime
+    +comentario: String [0..1]
+  }
+
+  class ResolucionNoRecogido <<value>> {
+    +tipo: TipoResolucion
+    +monto: Decimal [0..1]
+    +usuarioId: UUID
+    +fechaHora: DateTime
+  }
+
+  enum TipoResolucion {
+    TOTAL
+    PARCIAL
+    NINGUNO
+  }
+
+  class Pago {
+    +id: UUID
+    +pedidoId: UUID
+    +monto: Decimal
+    +estado: EstadoPago
+    +referenciaServicio: String
+    +fechaHora: DateTime
+  }
+
+  enum EstadoPago {
+    APROBADO
+    RECHAZADO
+  }
+
+  class Reembolso {
+    +id: UUID
+    +pedidoId: UUID
+    +monto: Decimal
+    +motivo: String
+    +estado: EstadoReembolso
+    +referenciaServicio: String [0..1]
+    +fechaHora: DateTime
+    +/puedeReintentar: Boolean
+  }
+
+  enum EstadoReembolso {
+    SOLICITADO
+    CONFIRMADO
+    FALLIDO
+  }
+}
+
+Usuario <|-- UsuarioTienda
+Usuario <|-- Cliente
+Cliente *-- "1" Direccion
+
+Usuario "0..1" --> "0..*" RegistroAuditoria : provoca >
+Usuario "1" *-- "0..*" TokenCuenta
+Usuario "0..1" --> "0..*" RegistroIdempotencia : envia >
+
+Producto "1" *-- "0..*" Lote
+Producto "1" --> "0..*" MovimientoInventario
+Lote "0..1" --> "0..*" MovimientoInventario
+UsuarioTienda "1" --> "0..*" MovimientoInventario : registra >
+Producto "0..*" --> "0..1" Proveedor : proveedorPreferido >
+Lote "0..*" --> "0..1" Proveedor : recibidoDe >
+Lote "0..*" --> "0..1" Oferta
+
+Recepcion "0..*" --> "1" Producto
+Recepcion "0..*" --> "1" Proveedor
+Recepcion "0..*" --> "1" Lote : crea >
+Recepcion "0..*" --> "1" MovimientoInventario
+Ajuste "0..*" --> "1" Producto
+Ajuste "0..*" --> "0..1" Lote
+Ajuste "0..*" --> "1" UsuarioTienda : registra >
+Producto "1" --> "0..*" Alerta
+Lote "0..1" --> "0..*" Alerta
+Alerta "0..*" --> "0..1" Proveedor : proveedorSugerido >
+
+Proveedor "1" *-- "0..*" Oferta
+Oferta "0..*" --> "0..1" Producto : vinculadaA >
+Sincronizacion "1" *-- "1..*" ResultadoProveedorSync
+ResultadoProveedorSync "0..*" --> "1" Proveedor
+ResultadoProveedorSync "1" *-- "0..*" RechazoOferta
+VinculacionPendiente "0..*" --> "1" Proveedor
+UsuarioTienda "1" --> "0..*" PropuestaCompra : genera >
+PropuestaCompra "1" *-- "1..*" RenglonPropuesta
+RenglonPropuesta "0..*" --> "1" Producto
+RenglonPropuesta "0..*" --> "0..1" Proveedor
+
+UsuarioTienda "1" --> "0..*" Venta : responsable >
+Venta "1" *-- "0..*" RenglonVenta
+RenglonVenta "0..*" --> "1" Producto
+RenglonVenta "1" *-- "0..*" SalidaLote
+RenglonPedido "1" *-- "0..*" SalidaLote
+SalidaLote "0..*" --> "1" Lote : salioDe >
+Venta "1" *-- "0..1" CancelacionVenta
+CancelacionVenta "0..*" --> "1" UsuarioTienda : cancela >
+Venta "1" *-- "0..*" Descuadre
+CorteCaja "0..1" o-- "0..*" Venta
+CorteCaja "0..*" --> "1" UsuarioTienda : realiza >
+
+Cliente "1" *-- "0..1" Carrito
+Carrito "1" *-- "0..*" RenglonCarrito
+RenglonCarrito "0..*" --> "1" Producto
+Cliente "1" --> "0..*" Pedido
+Pedido "1" *-- "1..*" RenglonPedido
+RenglonPedido "0..*" --> "1" Producto : pide >
+RenglonPedido "0..*" --> "0..1" Producto : sustituto >
+Pedido "1" *-- "1..*" HistorialEstadoPedido
+HistorialEstadoPedido "0..*" --> "0..1" Usuario : hechoPor >
+Pedido "0..*" --> "0..1" UsuarioTienda : asignadoA >
+Pedido "1" *-- "0..*" Pago
+Pedido "1" *-- "0..*" Reembolso
+Reembolso "0..*" --> "1" Pago : devuelveA >
+Pedido "1" *-- "0..1" ResolucionNoRecogido
+ConfiguracionTienda "1" *-- "0..*" CodigoPostalEntrega
+
+note bottom of Producto
+  Derivados, no se almacenan:
+  /existenciaFisica = Σ Lote.cantidad
+  /apartado = Σ RenglonPedido.cantidadApartada
+     de pedidos no entregados ni cancelados
+  /existenciaDisponible = existenciaFisica
+     - apartado - unidades de lotes caducados.
+  cdp, diasHistorial, diasEntregaUsados,
+  origenDiasEntrega, diasSeguridad y mensaje
+  salen en GET /productos/{id}/punto-reorden.
+  diasSeguridad se copia de ConfiguracionTienda.
+end note
+
+note bottom of Venta
+  BORRADOR no tiene folio ni formaPago.
+  El folio es texto, único al confirmar.
+  Una venta de un corte cerrado no se cancela.
+  Completada exige al menos un renglón.
+end note
+
+note bottom of SalidaLote
+  {xor} pertenece a un RenglonVenta o a un
+  RenglonPedido (entrega), nunca a ambos.
+  Guarda de qué lote salió cada unidad (FEFO):
+  la cancelación reintegra a esos lotes (RF-18-AC-1).
+end note
+
+note bottom of RegistroAuditoria
+  Polimórfico (entidad + entidadId).
+  Usuario nulo cuando lo escribe el worker.
+  Solo inserción (RNF-07).
+end note
+
+note bottom of PropuestaCompra
+  inventarioModificado y enviadaAlProveedor
+  quedan en falso. La propuesta no se envía
+  ni mueve existencia.
+end note
+
+note right of Alerta
+  A lo más una alerta ACTIVA de reorden
+  por producto. El empleado la ve sin costos
+  ni proveedor sugerido.
+end note
+
+note bottom of Usuario
+  passwordHash no sale en ningún schema.
+  Es nulo mientras la cuenta de la tienda
+  no se activa (estado INACTIVO).
+  El request manda contrasena.
+  estado INACTIVO responde 401
+  aunque el JWT siga vigente.
+end note
+
+note bottom of ConfiguracionTienda
+  Una sola configuración en el MVP.
+  codigosPostalesEntrega es la proyección
+  de los CodigoPostalEntrega activos.
+end note
+
+note bottom of Pago
+  Lo persiste el webhook o la conciliación.
+  monto, estado y fechaHora salen de consultar
+  el pago en ServicioPagos con data.id;
+  referenciaServicio es ese id.
+  El API no expone un GET de pagos.
+end note
+
+note bottom of Pedido
+  El request de alta manda Direccion.
+  La respuesta aplana calle y código en
+  direccion y codigoPostal.
+  A los 15 minutos sin pago pasa a EXPIRADO.
+end note
+
+@enduml
