@@ -1,0 +1,106 @@
+OK    GET /proveedores → 200  Proveedores sembrados
+OK    POST /productos → 201  Crear producto
+OK    POST /productos → 409  Código de barras duplicado
+OK    POST /productos → 409  Mismo nombre y presentación con acento y espacios
+OK    POST /productos → 422  Precio negativo
+OK    POST /productos → 422  Campo desconocido
+OK    POST /productos → 400  JSON mal formado
+OK    POST /productos → 201  Crear producto restringido
+OK    POST /productos → 201  Crear producto sin código de barras
+OK    GET /productos → 200  Listar fichas
+OK    GET /productos → 400  Tamaño de página fuera de rango
+OK    GET /productos/4920e2fa-1a7c-445a-a186-c4d0d7ef32ed → 200  Consultar ficha
+OK    GET /productos/fad9f18b-5cac-4002-93ad-84c15771c8c0 → 404  Ficha inexistente
+OK    GET /productos/no-es-uuid → 404  Id mal formado
+OK    PUT /productos/25819ef1-17b1-4d04-abb9-41846a52c373 → 200  Editar ficha y precio
+OK    PATCH /productos/25819ef1-17b1-4d04-abb9-41846a52c373/estado → 200  Desactivar producto
+OK    PATCH /productos/25819ef1-17b1-4d04-abb9-41846a52c373/estado → 200  Reactivar producto
+OK    GET /productos/4920e2fa-1a7c-445a-a186-c4d0d7ef32ed/costo → 200  Costo del producto
+OK    POST /recepciones → 422  Recepción sin Idempotency-Key
+OK    POST /recepciones → 201  Recepción
+OK    POST /recepciones → 201  Reintento con la misma clave
+OK       … el reintento devuelve la misma recepción y no crea otra
+OK    POST /recepciones → 409  Misma clave con otro cuerpo
+OK    POST /recepciones → 422  Perecedero sin caducidad
+OK    POST /recepciones → 201  Empleado envía costo (se ignora)
+OK       … costoIgnorado = true y sin costo en la respuesta
+OK    POST /recepciones → 201  Recepción de pan
+OK    GET /productos/4920e2fa-1a7c-445a-a186-c4d0d7ef32ed/lotes → 200  Lotes del producto
+OK    GET /recepciones → 200  Listar recepciones
+OK    GET /recepciones/bd2d7c66-2c80-41dd-888b-7bc94b0b8c66 → 200  Consultar recepción
+OK    GET /inventario/productos → 200  Inventario sin costos
+OK    GET /pos/productos → 200  POS por nombre sin acentos
+OK    GET /pos/productos → 200  POS por código de barras
+OK    GET /pos/productos → 200  POS sin coincidencias
+OK       … mensaje «Producto no encontrado»
+OK    POST /proveedores → 201  Crear proveedor de ruta
+OK    POST /proveedores → 409  Proveedor duplicado
+OK    GET /proveedores/a81e4cc7-1d03-4cd5-a6f7-2feb129ebe0c → 200  Consultar proveedor
+OK    GET /configuracion → 200  Consultar configuración
+OK    PATCH /configuracion → 422  20 días de seguridad
+OK       … mensaje del SRS
+OK    PATCH /configuracion → 422  Configuración sin campos
+OK    PATCH /configuracion → 200  Cambiar días de seguridad y costo de envío
+OK    GET /configuracion/codigos-postales → 200  Listar códigos postales
+OK    POST /configuracion/codigos-postales → 201  Agregar código postal
+OK    POST /configuracion/codigos-postales → 409  Código postal repetido
+OK    GET /configuracion/codigos-postales/72100 → 200  Consultar código postal
+OK    PATCH /configuracion/codigos-postales/72100 → 200  Desactivar código postal
+OK    GET /configuracion/codigos-postales/99999 → 404  Código postal inexistente
+OK    GET /usuarios → 200  Listar usuarios de la tienda
+OK    POST /usuarios → 201  Crear empleado
+OK    POST /usuarios → 409  Correo repetido
+OK    GET /usuarios/5d72ff91-dc07-46d8-8f2d-d5efb3b748a6 → 200  Consultar usuario
+OK    PATCH /usuarios/22222222-2222-4222-8222-222222222222 → 200  Desactivar al empleado
+OK    PATCH /usuarios/22222222-2222-4222-8222-222222222222 → 200  Reactivar al empleado
+OK    PATCH /usuarios/11111111-1111-4111-8111-111111111111 → 409  Desactivar a la última Dueña
+OK    GET /usuarios/17738bd5-8301-46b4-9954-963552c3b46e → 404  Usuario inexistente
+OK    POST /clientes → 201  Registrar cliente
+OK    POST /clientes → 409  Cliente con correo existente
+OK    POST /clientes → 422  Contraseña sin número
+OK    POST /ventas → 201  Abrir venta
+OK    POST /ventas/063ba851-d715-4116-b70f-e77ab6009489/renglones → 201  Agregar 2 leches
+OK    POST /ventas/063ba851-d715-4116-b70f-e77ab6009489/renglones → 422  Cantidad decimal
+OK    POST /ventas/063ba851-d715-4116-b70f-e77ab6009489/renglones → 422  Cantidad cero
+OK       … mensaje del SRS
+OK    POST /ventas/063ba851-d715-4116-b70f-e77ab6009489/renglones → 201  Agregar pan
+OK    PATCH /ventas/063ba851-d715-4116-b70f-e77ab6009489/renglones/01a17 → 200  Cambiar a 3 leches
+OK    DELETE /ventas/063ba851-d715-4116-b70f-e77ab6009489/renglones/01a17 → 200  Quitar el pan
+OK       … total recalculado a 85.50
+OK    POST /ventas/063ba851-d715-4116-b70f-e77ab6009489/confirmaciones → 422  Efectivo insuficiente
+OK       … informa el faltante 35.50
+OK    POST /ventas/063ba851-d715-4116-b70f-e77ab6009489/confirmaciones → 200  Confirmar en efectivo
+OK       … folio VTA-…, cambio 14.50
+OK    POST /ventas/063ba851-d715-4116-b70f-e77ab6009489/confirmaciones → 200  Reintento de la confirmación
+OK       … mismo folio, sin cobrar dos veces
+OK    POST /ventas/063ba851-d715-4116-b70f-e77ab6009489/confirmaciones → 409  Confirmar otra vez con otra clave
+OK    POST /ventas/063ba851-d715-4116-b70f-e77ab6009489/renglones → 409  Agregar renglón a venta confirmada
+OK    POST /ventas → 201  Abrir otra venta
+OK    POST /ventas/b5cb7b52-c81d-40a2-a9fe-df716e4c79ad/renglones → 201  Pedir 50 leches
+OK    POST /ventas/b5cb7b52-c81d-40a2-a9fe-df716e4c79ad/confirmaciones → 409  Existencia insuficiente
+OK       … señala producto, solicitada y disponible
+OK    GET /ventas → 200  Buscar venta por folio
+OK    GET /ventas/063ba851-d715-4116-b70f-e77ab6009489 → 200  Consultar venta
+OK    GET /ventas → 200  Listar ventas del día
+OK    GET /carrito → 200  Carrito vacío
+OK    POST /carrito/renglones → 201  Agregar al carrito
+OK    POST /carrito/renglones → 422  Más de lo disponible
+OK       … «Solo hay N disponibles»
+OK    POST /carrito/renglones → 422  Producto restringido
+OK       … «Producto no disponible en línea»
+OK    PATCH /carrito/renglones/01a1751f-ce12-7000-9a0b-bda10b66d4a3 → 200  Cambiar cantidad en el carrito
+OK    POST /carrito/renglones → 201  Agregar pan al carrito
+OK    DELETE /carrito/renglones/01a1751f-ce12-7000-9a0b-bda10b66d4a3 → 200  Quitar la leche del carrito
+OK    DELETE /carrito/renglones/f1878bb7-fa07-48cb-9f94-aade96c2886e → 404  Renglón de carrito inexistente
+OK    DELETE /carrito → 200  Vaciar carrito
+OK    BD   Lotes de leche: 15 recibidas, 3 vendidas, quedan 12
+OK    BD   FEFO: salió del lote que caduca primero (2030-01-10)
+OK    BD   La venta quedó COMPLETADA con folio y fecha
+OK    BD   El reintento no duplicó la recepción (3 recepciones)
+OK    BD   Movimientos: 3 de recepción y 1 de venta
+OK    BD   Auditoría escrita en la misma transacción
+OK    BD   Claves de idempotencia guardadas
+OK    BD   Configuración persistió (3 días, envío 30.00)
+OK    BD   El carrito quedó vacío
+
+104/104 verificaciones correctas (83 peticiones).
