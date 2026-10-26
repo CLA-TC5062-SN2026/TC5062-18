@@ -1,4 +1,4 @@
-"""Verifica la API en ejecución contra openapi_equipo.yaml.
+"""Verifica la API en ejecución contra openapi_equipo.yaml, incluida la seguridad.
 
 Para cada petición comprueba:
   1. que la ruta y el método existen en el contrato,
@@ -14,9 +14,16 @@ import re
 import sys
 import uuid
 
+import hashlib
+import os
+import secrets
+from datetime import datetime, timedelta, timezone
+
 import httpx
+import jwt
 import psycopg
 import yaml
+from dotenv import load_dotenv
 from jsonschema import ValidationError
 from openapi_schema_validator import OAS30Validator
 
@@ -30,6 +37,26 @@ spec = yaml.safe_load(open(CONTRATO, encoding="utf-8"))
 plantillas = [(re.compile("^" + re.sub(r"\{[^}]+\}", "[^/]+", p) + "$"), p) for p in spec["paths"]]
 resultados: list[tuple[str, bool, str]] = []
 cx = httpx.Client(base_url=BASE, timeout=20)
+load_dotenv()
+SECRETO = os.environ["JWT_SECRET"]  # solo para fabricar un token vencido en la prueba
+DSN = "postgresql://tiendinet:tiendinet@localhost:5432/tiendinet"
+# Los alias de la actividad se validan contra la operación del contrato que ejecutan.
+ALIAS = {"/api/auth/register": "/clientes", "/api/auth/login": "/auth/sesiones", "/api/auth/me": "/auth/yo"}
+
+
+def iniciar(correo, contrasena="Tienda2026"):
+    r = cx.post("/auth/sesiones", json={"correo": correo, "contrasena": contrasena})
+    assert r.status_code == 200, r.text
+    return r.json()["token"]
+
+
+def bearer(token):
+    return {"Authorization": f"Bearer {token}"}
+
+
+T_DUENA, T_EMPLEADO, T_CLIENTE = (iniciar(c) for c in ("duena@tiendinet.mx", "empleado@tiendinet.mx", "ana@correo.mx"))
+cx.headers.update(bearer(T_DUENA))  # por omisión opera la Dueña
+EMP, CLI = bearer(T_EMPLEADO), bearer(T_CLIENTE)
 
 
 def _resolver(nodo):
@@ -47,7 +74,8 @@ def llamar(nombre, metodo, ruta, esperado, cuerpo=None, crudo=None, encabezados=
     problemas = []
     if r.status_code != esperado:
         problemas.append(f"código {r.status_code}, se esperaba {esperado}")
-    plantilla = next((p for rx, p in plantillas if rx.match(ruta.split("?")[0])), None)
+    sin_query = ruta.split("?")[0]
+    plantilla = next((p for rx, p in plantillas if rx.match(ALIAS.get(sin_query, sin_query))), None)
     operacion = spec["paths"].get(plantilla, {}).get(metodo.lower()) if plantilla else None
     if operacion is None:
         problemas.append("la operación no existe en el contrato")
@@ -117,7 +145,7 @@ llamar("Misma clave con otro cuerpo", "POST", "/recepciones", 409, {**recepcion,
 llamar("Perecedero sin caducidad", "POST", "/recepciones", 422,
        {k2: v for k2, v in recepcion.items() if k2 != "fechaCaducidad"}, encabezados=clave())
 r = llamar("Empleado envía costo (se ignora)", "POST", "/recepciones", 201,
-           {**recepcion, "cantidad": 5, "fechaCaducidad": "2030-01-10"}, encabezados={**clave(), "X-Usuario-Id": EMPLEADO})
+           {**recepcion, "cantidad": 5, "fechaCaducidad": "2030-01-10"}, encabezados={**clave(), **EMP})
 resultados.append(("   … costoIgnorado = true y sin costo en la respuesta",
                    r.json().get("costoIgnorado") is True and r.json()["lote"]["costoUnitario"] is None, str(r.json())[:120]))
 llamar("Recepción de pan", "POST", "/recepciones", 201,
@@ -154,6 +182,8 @@ nuevo = llamar("Crear empleado", "POST", "/usuarios", 201,
 llamar("Correo repetido", "POST", "/usuarios", 409, {"nombre": "X", "correo": "MARTA@tiendinet.mx", "rol": "EMPLEADO"})
 llamar("Consultar usuario", "GET", f"/usuarios/{nuevo['id']}", 200)
 llamar("Desactivar al empleado", "PATCH", f"/usuarios/{EMPLEADO}", 200, {"estado": "INACTIVO"})
+r = llamar("Empleado desactivado con token vigente", "GET", "/pos/productos?q=leche", 401, encabezados=EMP)
+resultados.append(("   … 401 CUENTA_INACTIVA (RF-03-AC-2)", r.json().get("codigo") == "CUENTA_INACTIVA", r.text))
 llamar("Reactivar al empleado", "PATCH", f"/usuarios/{EMPLEADO}", 200, {"estado": "ACTIVO"})
 llamar("Desactivar a la última Dueña", "PATCH", f"/usuarios/{DUENA}", 409, {"estado": "INACTIVO"})
 llamar("Usuario inexistente", "GET", f"/usuarios/{uuid.uuid4()}", 404)
@@ -201,21 +231,101 @@ llamar("Buscar venta por folio", "GET", f"/ventas?folio={folio}", 200)
 llamar("Consultar venta", "GET", f"/ventas/{vid}", 200)
 llamar("Listar ventas del día", "GET", "/ventas", 200)
 
-llamar("Carrito vacío", "GET", "/carrito", 200)
-r = llamar("Agregar al carrito", "POST", "/carrito/renglones", 201, {"productoId": leche_id, "cantidad": 2})
+llamar("Carrito vacío", "GET", "/carrito", 200, encabezados=CLI)
+r = llamar("Agregar al carrito", "POST", "/carrito/renglones", 201, {"productoId": leche_id, "cantidad": 2}, encabezados=CLI)
 renglon_carrito = r.json()["renglones"][0]["id"]
-r = llamar("Más de lo disponible", "POST", "/carrito/renglones", 422, {"productoId": leche_id, "cantidad": 40})
+r = llamar("Más de lo disponible", "POST", "/carrito/renglones", 422, {"productoId": leche_id, "cantidad": 40}, encabezados=CLI)
 resultados.append(("   … «Solo hay N disponibles»", r.json().get("mensaje") == "Solo hay 12 disponibles", r.text))
-r = llamar("Producto restringido", "POST", "/carrito/renglones", 422, {"productoId": cerveza_id, "cantidad": 1})
+r = llamar("Producto restringido", "POST", "/carrito/renglones", 422, {"productoId": cerveza_id, "cantidad": 1}, encabezados=CLI)
 resultados.append(("   … «Producto no disponible en línea»", r.json().get("mensaje") == "Producto no disponible en línea", r.text))
-llamar("Cambiar cantidad en el carrito", "PATCH", f"/carrito/renglones/{renglon_carrito}", 200, {"cantidad": 4})
-llamar("Agregar pan al carrito", "POST", "/carrito/renglones", 201, {"productoId": pan_id, "cantidad": 1})
-llamar("Quitar la leche del carrito", "DELETE", f"/carrito/renglones/{renglon_carrito}", 200)
-llamar("Renglón de carrito inexistente", "DELETE", f"/carrito/renglones/{uuid.uuid4()}", 404)
-r = llamar("Vaciar carrito", "DELETE", "/carrito", 200)
+llamar("Cambiar cantidad en el carrito", "PATCH", f"/carrito/renglones/{renglon_carrito}", 200, {"cantidad": 4}, encabezados=CLI)
+llamar("Agregar pan al carrito", "POST", "/carrito/renglones", 201, {"productoId": pan_id, "cantidad": 1}, encabezados=CLI)
+llamar("Quitar la leche del carrito", "DELETE", f"/carrito/renglones/{renglon_carrito}", 200, encabezados=CLI)
+llamar("Renglón de carrito inexistente", "DELETE", f"/carrito/renglones/{uuid.uuid4()}", 404, encabezados=CLI)
+r = llamar("Vaciar carrito", "DELETE", "/carrito", 200, encabezados=CLI)
+
+# ----------------------------------------------------------------- seguridad
+# Autenticación (Parte 1)
+nuevo_cliente = {"nombre": "Paola Ríos", "correo": f"paola{secrets.randbelow(10**6)}@correo.mx", "telefono": "2225550101",
+                 "contrasena": "Segura2026", "direccion": {"calle": "Reforma 300", "codigoPostal": "72000"},
+                 "avisoPrivacidadAceptado": True}
+r = llamar("Registro (alias de la actividad)", "POST", "/api/auth/register", 201, nuevo_cliente, encabezados={"Authorization": ""})
+resultados.append(("   … la respuesta no trae contraseña ni hash",
+                   not any(k in r.json() for k in ("contrasena", "password", "passwordHash", "password_hash")), r.text))
+llamar("Contraseña de más de 72 bytes", "POST", "/api/auth/register", 422,
+       {**nuevo_cliente, "correo": "largo@correo.mx", "contrasena": "Ñ1" * 40}, encabezados={"Authorization": ""})
+r = llamar("Login (alias de la actividad)", "POST", "/api/auth/login", 200,
+           {"correo": nuevo_cliente["correo"], "contrasena": "Segura2026"}, encabezados={"Authorization": ""})
+t_nuevo = r.json()["token"]
+carga = jwt.decode(t_nuevo, options={"verify_signature": False})
+resultados.append(("   … JWT con exp explícito: 24 h para Cliente, rol y sub",
+                   carga["exp"] - carga["iat"] == 24 * 3600 and carga["rol"] == "CLIENTE" and carga["sub"] == r.json()["usuario"]["id"],
+                   str(carga)))
+carga_d = jwt.decode(T_DUENA, options={"verify_signature": False})
+resultados.append(("   … JWT de la Dueña dura 60 min", carga_d["exp"] - carga_d["iat"] == 3600, str(carga_d)))
+r = llamar("Me (alias de la actividad)", "GET", "/api/auth/me", 200, encabezados=bearer(t_nuevo))
+resultados.append(("   … devuelve al usuario del token", r.json().get("correo") == nuevo_cliente["correo"], r.text))
+llamar("Me (ruta del contrato)", "GET", "/auth/yo", 200)
+r = llamar("Contraseña incorrecta", "POST", "/auth/sesiones", 401, {"correo": "duena@tiendinet.mx", "contrasena": "Mala2026"},
+           encabezados={"Authorization": ""})
+r2 = llamar("Correo inexistente", "POST", "/auth/sesiones", 401, {"correo": "nadie@tiendinet.mx", "contrasena": "Mala2026"},
+            encabezados={"Authorization": ""})
+resultados.append(("   … mismo mensaje en los dos casos (no revela si el correo existe)", r.json() == r2.json(), r2.text))
+for i in range(4):
+    cx.post("/auth/sesiones", json={"correo": "nadie@tiendinet.mx", "contrasena": f"Mala{i}2026"}, headers={"Authorization": ""})
+r = llamar("Sexto intento tras 5 fallos", "POST", "/auth/sesiones", 429, {"correo": "nadie@tiendinet.mx", "contrasena": "Mala2026"},
+           encabezados={"Authorization": ""})
+resultados.append(("   … 429 con reintentaEnSegundos (RF-01-AC-5)", 0 < r.json().get("reintentaEnSegundos", 0) <= 900, r.text))
+llamar("Otro correo desde la misma IP no se bloquea", "POST", "/auth/sesiones", 200,
+       {"correo": "duena@tiendinet.mx", "contrasena": "Tienda2026"}, encabezados={"Authorization": ""})
+
+# Middleware (Parte 1 y 2)
+r = llamar("Ruta protegida sin token", "GET", "/productos", 401, encabezados={"Authorization": ""})
+resultados.append(("   … encabezado WWW-Authenticate: Bearer", r.headers.get("www-authenticate") == "Bearer", str(r.headers)))
+llamar("Esquema distinto a Bearer", "GET", "/productos", 401, encabezados={"Authorization": f"Basic {T_DUENA}"})
+alterado = T_DUENA[:-6] + ("A" if T_DUENA[-6] != "A" else "B") + T_DUENA[-5:]
+r = llamar("Token con un carácter modificado", "GET", "/productos", 401, encabezados=bearer(alterado))
+resultados.append(("   … TOKEN_INVALIDO", r.json().get("codigo") == "TOKEN_INVALIDO", r.text))
+vencido = jwt.encode({"sub": carga_d["sub"], "rol": "DUENO", "correo": "duena@tiendinet.mx",
+                      "iat": datetime.now(timezone.utc) - timedelta(hours=2),
+                      "exp": datetime.now(timezone.utc) - timedelta(hours=1)}, SECRETO, algorithm="HS256")
+r = llamar("Token expirado (firma correcta)", "GET", "/productos", 401, encabezados=bearer(vencido))
+resultados.append(("   … TOKEN_EXPIRADO", r.json().get("codigo") == "TOKEN_EXPIRADO", r.text))
+otro_secreto = jwt.encode({**carga_d}, "x" * 48, algorithm="HS256")
+llamar("Token firmado con otro secreto", "GET", "/productos", 401, encabezados=bearer(otro_secreto))
+sin_firma = jwt.encode({**carga_d}, None, algorithm="none")
+llamar("Token con alg none", "GET", "/productos", 401, encabezados=bearer(sin_firma))
+escalado = jwt.encode({**jwt.decode(T_EMPLEADO, options={"verify_signature": False}), "rol": "DUENO"}, "y" * 48, algorithm="HS256")
+llamar("Empleado que se cambia el rol a DUENO en el token", "GET", "/productos", 401, encabezados=bearer(escalado))
+
+# Roles (Parte 2)
+llamar("Empleado en ruta de Dueño", "GET", "/productos", 403, encabezados=EMP)
+llamar("Empleado pide el costo (RF-01-AC-3)", "GET", f"/productos/{leche_id}/costo", 403, encabezados=EMP)
+llamar("Empleado cambia configuración", "PATCH", "/configuracion", 403, {"diasSeguridad": 5}, encabezados=EMP)
+llamar("Empleado en ruta de tienda", "GET", "/pos/productos?q=leche", 200, encabezados=EMP)
+llamar("Cliente en ruta de tienda", "POST", "/ventas", 403, encabezados=CLI)
+llamar("Cliente crea producto", "POST", "/productos", 403, {**pan, "nombre": "Pan integral"}, encabezados=CLI)
+llamar("Dueña en el carrito (solo Cliente)", "GET", "/carrito", 403)
+llamar("Cliente en su carrito", "GET", "/carrito", 200, encabezados=CLI)
+
+# Activación de una cuenta de la tienda (token de un solo uso)
+nueva = llamar("Dueña crea un empleado", "POST", "/usuarios", 201,
+               {"nombre": "Diego Luna", "correo": "diego@tiendinet.mx", "rol": "EMPLEADO"}).json()
+enlace = secrets.token_urlsafe(32)
+with psycopg.connect(DSN) as db:  # simula el correo: se guarda solo el hash, como hace la API
+    db.execute("UPDATE token_cuenta SET token_hash = %s WHERE usuario_id = %s",
+               (hashlib.sha256(enlace.encode()).hexdigest(), nueva["id"]))
+llamar("Login antes de activar", "POST", "/auth/sesiones", 401, {"correo": "diego@tiendinet.mx", "contrasena": "Empleado2026"},
+       encabezados={"Authorization": ""})
+llamar("Activar la cuenta", "POST", "/usuarios/activacion", 200, {"token": enlace, "contrasena": "Empleado2026"},
+       encabezados={"Authorization": ""})
+llamar("Reusar el enlace", "POST", "/usuarios/activacion", 422, {"token": enlace, "contrasena": "Otra2026x"},
+       encabezados={"Authorization": ""})
+llamar("Login después de activar", "POST", "/auth/sesiones", 200, {"correo": "diego@tiendinet.mx", "contrasena": "Empleado2026"},
+       encabezados={"Authorization": ""})
 
 # --------------------------------------------------------------- persistencia
-with psycopg.connect("postgresql://tiendinet:tiendinet@localhost:5432/tiendinet") as db:
+with psycopg.connect(DSN) as db:
     def uno(sql, *args):
         return db.execute(sql, args).fetchone()[0]
     checks = [
@@ -235,6 +345,10 @@ with psycopg.connect("postgresql://tiendinet:tiendinet@localhost:5432/tiendinet"
         ("Configuración persistió (3 días, envío 30.00)",
          uno("SELECT dias_seguridad || ' ' || costo_envio FROM configuracion_tienda") == "3 30.00"),
         ("El carrito quedó vacío", uno("SELECT count(*) FROM renglon_carrito") == 0),
+        ("Contraseñas guardadas con bcrypt ($2b$, costo 12)",
+         uno("SELECT bool_and(password_hash LIKE '$2b$12$%%') FROM usuario WHERE password_hash IS NOT NULL")),
+        ("Ningún token de activación en claro", uno("SELECT bool_and(length(token_hash) = 64) FROM token_cuenta")),
+        ("Intentos de login registrados", uno("SELECT count(*) FROM intento_inicio_sesion WHERE NOT exitoso") >= 7),
     ]
     for nombre, ok in checks:
         resultados.append((f"BD   {nombre}", ok, "no coincide"))

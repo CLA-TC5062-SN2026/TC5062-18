@@ -1,4 +1,4 @@
-"""Utilidades compartidas: formatos, actor, existencias, auditoría,
+"""Utilidades compartidas: formatos, existencias, auditoría,
 idempotencia y la traducción de filas a los schemas del contrato."""
 import hashlib
 import json
@@ -7,13 +7,12 @@ from datetime import date, datetime, time, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from zoneinfo import ZoneInfo
 
-from fastapi import Depends, Header
+from fastapi import Header
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import modelos as m
-from app.db import obtener_db
 from app.errores import ErrorApi, no_encontrado
 
 TZ_MX = ZoneInfo("America/Mexico_City")
@@ -74,39 +73,6 @@ def paginar(db: Session, consulta, pagina: int, tamano: int):
     total = db.scalar(select(func.count()).select_from(consulta.order_by(None).subquery()))
     filas = db.scalars(consulta.limit(tamano).offset((pagina - 1) * tamano)).unique().all()
     return filas, total
-
-
-# -------------------------------------------------------------------- actor
-# La seguridad (JWT y roles) se agrega en la siguiente actividad. Mientras,
-# el encabezado opcional X-Usuario-Id dice quién hace la operación; sin él se
-# usa el primer Dueño activo o el primer cliente, según el endpoint.
-def actor_tienda(db: Session = Depends(obtener_db),
-                 x_usuario_id: str | None = Header(None, alias="X-Usuario-Id")) -> m.UsuarioTienda:
-    if x_usuario_id:
-        usuario = db.get(m.UsuarioTienda, id_de_ruta(x_usuario_id))
-        if usuario is None:
-            raise ErrorApi(403, "PROHIBIDO", "X-Usuario-Id no corresponde a un usuario de la tienda.")
-        return usuario
-    usuario = db.scalars(
-        select(m.UsuarioTienda).join(m.Usuario)
-        .where(m.UsuarioTienda.rol == "DUENO", m.Usuario.estado == "ACTIVO")
-        .order_by(m.Usuario.correo)).first()
-    if usuario is None:
-        raise ErrorApi(500, "ERROR_INTERNO", "No hay un Dueño activo. Carga datos_prueba.sql.")
-    return usuario
-
-
-def actor_cliente(db: Session = Depends(obtener_db),
-                  x_usuario_id: str | None = Header(None, alias="X-Usuario-Id")) -> m.Cliente:
-    if x_usuario_id:
-        cliente = db.get(m.Cliente, id_de_ruta(x_usuario_id))
-        if cliente is None:
-            raise ErrorApi(403, "PROHIBIDO", "X-Usuario-Id no corresponde a un cliente.")
-        return cliente
-    cliente = db.scalars(select(m.Cliente).join(m.Usuario).order_by(m.Usuario.correo)).first()
-    if cliente is None:
-        raise ErrorApi(500, "ERROR_INTERNO", "No hay clientes. Carga datos_prueba.sql.")
-    return cliente
 
 
 # --------------------------------------------------------------- existencias

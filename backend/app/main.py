@@ -3,8 +3,9 @@
 Ejecutar:  uvicorn app.main:app --reload --port 8000
 Documentación interactiva: http://localhost:8000/docs
 
-Esta versión NO tiene seguridad (JWT ni roles); se agrega en la siguiente
-actividad. El encabezado opcional X-Usuario-Id indica quién hace la operación.
+Seguridad (S05-S06-A2): toda ruta exige `Authorization: Bearer <token>`
+salvo las públicas del contrato (registro, inicio de sesión, activación).
+El token se obtiene en POST /auth/sesiones (alias POST /api/auth/login).
 """
 import logging
 
@@ -13,18 +14,20 @@ from sqlalchemy import text
 
 from app.db import motor
 from app.errores import instalar_manejadores
-from app.rutas import acceso, carrito, configuracion, inventario, productos, proveedores, ventas
+from app.rutas import acceso, auth, carrito, configuracion, inventario, productos, proveedores, ventas
+from app.seguridad import MiddlewareAutenticacion
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
 app = FastAPI(
     title="API TiendiNet",
     version="2.0.0",
-    description="Implementación de openapi_equipo.yaml (Parte 2: CRUD sin seguridad).",
+    description="Implementación de openapi_equipo.yaml con autenticación JWT y control de acceso por rol.",
 )
 instalar_manejadores(app)
+app.add_middleware(MiddlewareAutenticacion)
 
-for modulo in (acceso, productos, inventario, proveedores, configuracion, ventas, carrito):
+for modulo in (auth, acceso, productos, inventario, proveedores, configuracion, ventas, carrito):
     app.include_router(modulo.router)
 
 

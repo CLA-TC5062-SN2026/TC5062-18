@@ -1,6 +1,6 @@
-# API TiendiNet: servicios CRUD (Parte 2)
+# API TiendiNet
 
-Python 3.12 o más reciente, FastAPI, SQLAlchemy 2 y PostgreSQL 16. Implementa las operaciones de `openapi_equipo.yaml` para las entidades principales. **Sin seguridad**: JWT y roles llegan en la siguiente actividad.
+Python 3.10 o más reciente, FastAPI, SQLAlchemy 2 y PostgreSQL 16. Implementa las operaciones de `openapi_equipo.yaml` para las entidades principales, con autenticación JWT y control de acceso por rol (S05-S06-A2).
 
 ## Correr en local
 
@@ -14,7 +14,8 @@ psql -U tiendinet -d tiendinet -f datos_prueba.sql
 # 2. Dependencias y variables
 python -m venv .venv && source .venv/bin/activate   # en Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env               # y ajusta DB_PASSWORD
+cp .env.example .env               # ajusta DB_PASSWORD y pon un JWT_SECRET propio:
+python -c "import secrets; print(secrets.token_urlsafe(48))"
 
 # 3. Servidor
 uvicorn app.main:app --reload --port 8000
@@ -25,19 +26,29 @@ uvicorn app.main:app --reload --port 8000
 
 Para volver a una base limpia, se cargan otra vez `esquema_bd.sql` y `datos_prueba.sql`.
 
-## Quién hace la operación
+## Autenticación
 
-Mientras no hay JWT, el encabezado opcional `X-Usuario-Id` indica el usuario. Sin él, las operaciones de la tienda las hace la Dueña sembrada y las del carrito, la clienta sembrada.
+Toda ruta exige `Authorization: Bearer <token>`, salvo las públicas del contrato: registro, inicio de sesión y activación de cuentas.
 
-| Usuario | Id | Rol |
+| Operación | Ruta del contrato | Alias de la actividad |
 |---|---|---|
-| Rosa Hernández | `11111111-1111-4111-8111-111111111111` | Dueña |
-| Luis Pérez | `22222222-2222-4222-8222-222222222222` | Empleado |
-| Ana Torres | `33333333-3333-4333-8333-333333333333` | Cliente |
+| Registro de cliente | `POST /clientes` | `POST /api/auth/register` |
+| Iniciar sesión | `POST /auth/sesiones` | `POST /api/auth/login` |
+| Usuario del token | `GET /auth/yo` | `GET /api/auth/me` |
+
+Usuarios de `datos_prueba.sql`, todos con contraseña `Tienda2026`:
+
+| Usuario | Correo | Rol |
+|---|---|---|
+| Rosa Hernández | `duena@tiendinet.mx` | Dueña |
+| Luis Pérez | `empleado@tiendinet.mx` | Empleado |
+| Ana Torres | `ana@correo.mx` | Cliente |
+
+Variables de entorno de seguridad: `JWT_SECRET` (obligatoria, 32 caracteres o más), `JWT_EXPIRATION` (minutos, 60), `JWT_EXPIRATION_CLIENTE` (minutos, 1440) y `BCRYPT_ROUNDS` (12). El detalle de la revisión está en `S05_S06_A2/revision_seguridad.md`.
 
 ## Qué cubre
 
-38 operaciones en 7 módulos, los mismos de la arquitectura de equipo:
+38 operaciones CRUD en 7 módulos, los mismos de la arquitectura de equipo, más las de autenticación (inicio de sesión, usuario actual, activación y los alias de la actividad):
 
 | Módulo | Operaciones |
 |---|---|
@@ -56,7 +67,12 @@ Quedan para las siguientes semanas: pedidos, pagos y webhook, reembolsos, sincro
 ## Verificación
 
 ```bash
+python verificar_roles.py ../openapi_equipo.yaml    # cada ruta tiene el rol que dice el contrato
+./pruebas_seguridad.sh                             # 401 sin token, 401 token alterado, 403 rol, 200
+```
+
+```bash
 python verificar_api.py http://localhost:8000 ../openapi_equipo.yaml
 ```
 
-Ejecuta 83 peticiones, de éxito y de error. Por cada respuesta comprueba que la ruta exista en el contrato, que el código HTTP esté declarado y que el cuerpo valide contra el schema. Al final revisa en PostgreSQL que los datos persistieron. Resultado: 104/104. Necesita una base recién cargada.
+`verificar_api.py` ejecuta 113 peticiones, de éxito, de error y de seguridad. Por cada respuesta comprueba que la ruta exista en el contrato, que el código HTTP esté declarado y que el cuerpo valide contra el schema. Al final revisa en PostgreSQL que los datos persistieron y que las contraseñas se guardaron con bcrypt. Resultado: 147/147. Necesita una base recién cargada.

@@ -4,9 +4,10 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import modelos as m
-from app.comun import (a_decimal, actor_tienda, auditar, dinero, existencia, existencias, id_de_ruta,
+from app.comun import (a_decimal, auditar, dinero, existencia, existencias, id_de_ruta,
                        json_lote, json_producto, json_producto_inventario, paginar)
 from app.db import obtener_db
+from app.seguridad import DUENO, TIENDA
 from app.errores import ErrorApi, no_encontrado
 from app.esquemas import CambioEstadoProducto, ProductoCrear, ProductoReemplazo
 
@@ -49,7 +50,7 @@ def _buscar(consulta, q: str | None):
 
 @router.post("/productos", status_code=201)
 def crear_producto(cuerpo: ProductoCrear, db: Session = Depends(obtener_db),
-                   actor: m.UsuarioTienda = Depends(actor_tienda)):
+                   actor: m.UsuarioTienda = Depends(DUENO)):
     _sin_duplicados(db, cuerpo)
     producto = m.Producto(
         codigo_barras=cuerpo.codigoBarras, nombre=cuerpo.nombre, presentacion=cuerpo.presentacion,
@@ -65,7 +66,7 @@ def crear_producto(cuerpo: ProductoCrear, db: Session = Depends(obtener_db),
     return json_producto(producto, (0, 0, 0))
 
 
-@router.get("/productos")
+@router.get("/productos", dependencies=[Depends(DUENO)])
 def listar_productos(pagina: int = Query(1, ge=1), tamano: int = Query(20, ge=1, le=100),
                      q: str | None = None, estado: str | None = Query(None, pattern="^(ACTIVO|INACTIVO)$"),
                      categoria: str | None = None, db: Session = Depends(obtener_db)):
@@ -80,7 +81,7 @@ def listar_productos(pagina: int = Query(1, ge=1), tamano: int = Query(20, ge=1,
             "pagina": pagina, "tamano": tamano, "total": total}
 
 
-@router.get("/productos/{producto_id}")
+@router.get("/productos/{producto_id}", dependencies=[Depends(DUENO)])
 def consultar_producto(producto_id: str, db: Session = Depends(obtener_db)):
     producto = _producto(db, producto_id)
     return json_producto(producto, existencia(db, producto.id))
@@ -88,7 +89,7 @@ def consultar_producto(producto_id: str, db: Session = Depends(obtener_db)):
 
 @router.put("/productos/{producto_id}")
 def reemplazar_producto(producto_id: str, cuerpo: ProductoReemplazo, db: Session = Depends(obtener_db),
-                        actor: m.UsuarioTienda = Depends(actor_tienda)):
+                        actor: m.UsuarioTienda = Depends(DUENO)):
     producto = _producto(db, producto_id)
     _sin_duplicados(db, cuerpo, excepto=producto.id)
     anterior = {"nombre": producto.nombre, "precioVenta": dinero(producto.precio_venta),
@@ -110,7 +111,7 @@ def reemplazar_producto(producto_id: str, cuerpo: ProductoReemplazo, db: Session
 
 @router.patch("/productos/{producto_id}/estado")
 def cambiar_estado_producto(producto_id: str, cuerpo: CambioEstadoProducto, db: Session = Depends(obtener_db),
-                            actor: m.UsuarioTienda = Depends(actor_tienda)):
+                            actor: m.UsuarioTienda = Depends(DUENO)):
     """Es la «baja» del producto: no se borra (RNF-14), se oculta del POS y del catálogo."""
     producto = _producto(db, producto_id)
     anterior = producto.estado
@@ -121,7 +122,7 @@ def cambiar_estado_producto(producto_id: str, cuerpo: CambioEstadoProducto, db: 
     return json_producto(producto, existencia(db, producto.id))
 
 
-@router.get("/productos/{producto_id}/costo")
+@router.get("/productos/{producto_id}/costo", dependencies=[Depends(DUENO)])
 def consultar_costo(producto_id: str, db: Session = Depends(obtener_db)):
     producto = _producto(db, producto_id)
     return {"productoId": str(producto.id), "costoReferencia": dinero(producto.costo_referencia)}
@@ -129,7 +130,7 @@ def consultar_costo(producto_id: str, db: Session = Depends(obtener_db)):
 
 @router.get("/productos/{producto_id}/lotes")
 def listar_lotes(producto_id: str, db: Session = Depends(obtener_db),
-                 actor: m.UsuarioTienda = Depends(actor_tienda)):
+                 actor: m.UsuarioTienda = Depends(TIENDA)):
     producto = _producto(db, producto_id)
     lotes = db.scalars(select(m.Lote).where(m.Lote.producto_id == producto.id)
                        .order_by(m.Lote.fecha_caducidad.asc().nulls_last(), m.Lote.recibido_en)).all()
@@ -137,7 +138,7 @@ def listar_lotes(producto_id: str, db: Session = Depends(obtener_db),
     return {"productoId": str(producto.id), "lotes": [json_lote(lote, con_costo) for lote in lotes]}
 
 
-@router.get("/inventario/productos")
+@router.get("/inventario/productos", dependencies=[Depends(TIENDA)])
 def listar_inventario(pagina: int = Query(1, ge=1), tamano: int = Query(20, ge=1, le=100),
                       q: str | None = None, estado: str | None = Query(None, pattern="^(ACTIVO|INACTIVO)$"),
                       db: Session = Depends(obtener_db)):
@@ -150,7 +151,7 @@ def listar_inventario(pagina: int = Query(1, ge=1), tamano: int = Query(20, ge=1
             "pagina": pagina, "tamano": tamano, "total": total}
 
 
-@router.get("/pos/productos")
+@router.get("/pos/productos", dependencies=[Depends(TIENDA)])
 def buscar_pos(q: str | None = None, codigoBarras: str | None = Query(None, pattern=r"^\d{13}$"),
                db: Session = Depends(obtener_db)):
     """RF-15: lector o tecleo exacto por código de barras, o nombre parcial sin mayúsculas ni acentos."""

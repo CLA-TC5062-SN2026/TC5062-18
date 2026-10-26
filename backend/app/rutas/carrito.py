@@ -3,8 +3,9 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app import modelos as m
-from app.comun import actor_cliente, existencia, id_de_ruta, json_carrito
+from app.comun import existencia, id_de_ruta, json_carrito
 from app.db import obtener_db
+from app.seguridad import CLIENTE
 from app.errores import ErrorApi, no_encontrado
 from app.esquemas import RenglonCantidad, RenglonCarritoCrear
 
@@ -39,12 +40,12 @@ def _renglon(carrito: m.Carrito | None, renglon_id: str) -> m.RenglonCarrito:
 
 
 @router.get("/carrito")
-def consultar_carrito(db: Session = Depends(obtener_db), cliente: m.Cliente = Depends(actor_cliente)):
+def consultar_carrito(db: Session = Depends(obtener_db), cliente: m.Cliente = Depends(CLIENTE)):
     return json_carrito(_carrito(db, cliente))
 
 
 @router.delete("/carrito")
-def vaciar_carrito(db: Session = Depends(obtener_db), cliente: m.Cliente = Depends(actor_cliente)):
+def vaciar_carrito(db: Session = Depends(obtener_db), cliente: m.Cliente = Depends(CLIENTE)):
     carrito = _carrito(db, cliente)
     if carrito:
         carrito.renglones.clear()
@@ -54,7 +55,7 @@ def vaciar_carrito(db: Session = Depends(obtener_db), cliente: m.Cliente = Depen
 
 @router.post("/carrito/renglones", status_code=201)
 def agregar_al_carrito(cuerpo: RenglonCarritoCrear, db: Session = Depends(obtener_db),
-                       cliente: m.Cliente = Depends(actor_cliente)):
+                       cliente: m.Cliente = Depends(CLIENTE)):
     producto = db.get(m.Producto, cuerpo.productoId)
     if producto is None or producto.estado != "ACTIVO":
         raise no_encontrado("El producto no existe.")
@@ -74,7 +75,7 @@ def agregar_al_carrito(cuerpo: RenglonCarritoCrear, db: Session = Depends(obtene
 
 @router.patch("/carrito/renglones/{renglon_id}")
 def cambiar_cantidad(renglon_id: str, cuerpo: RenglonCantidad, db: Session = Depends(obtener_db),
-                     cliente: m.Cliente = Depends(actor_cliente)):
+                     cliente: m.Cliente = Depends(CLIENTE)):
     carrito = _carrito(db, cliente)
     renglon = _renglon(carrito, renglon_id)
     _validar_disponible(db, renglon.producto, cuerpo.cantidad)
@@ -85,7 +86,7 @@ def cambiar_cantidad(renglon_id: str, cuerpo: RenglonCantidad, db: Session = Dep
 
 @router.delete("/carrito/renglones/{renglon_id}")
 def quitar_del_carrito(renglon_id: str, db: Session = Depends(obtener_db),
-                       cliente: m.Cliente = Depends(actor_cliente)):
+                       cliente: m.Cliente = Depends(CLIENTE)):
     carrito = _carrito(db, cliente)
     renglon = _renglon(carrito, renglon_id)
     carrito.renglones.remove(renglon)

@@ -11,7 +11,7 @@ from decimal import Decimal
 
 from sqlalchemy import (Boolean, Date, DateTime, FetchedValue, ForeignKey, Integer,
                         Numeric, SmallInteger, String, Time, Uuid, func)
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import INET, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -322,3 +322,12 @@ class RenglonCarrito(Base):
     cantidad: Mapped[int] = mapped_column(Integer)
 
     producto: Mapped[Producto] = relationship(lazy="joined")
+
+
+class IntentoInicioSesion(Base):
+    __tablename__ = "intento_inicio_sesion"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    correo: Mapped[str] = mapped_column(String(254))
+    ip: Mapped[str] = mapped_column(INET)
+    exitoso: Mapped[bool] = mapped_column(Boolean)
+    fecha_hora: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

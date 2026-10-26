@@ -1,0 +1,16 @@
+### 1. Sin token -> 401
+$ curl http://localhost:8000/proveedores
+{"mensaje":"Falta el token. Envía Authorization: Bearer <token>.","codigo":"TOKEN_AUSENTE"}  -> HTTP 401
+
+### 2. Token con un carácter cambiado -> 401
+$ curl -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXV…" http://localhost:8000/proveedores
+{"mensaje":"El token no es válido.","codigo":"TOKEN_INVALIDO"}  -> HTTP 401
+
+### 3. Token válido de Empleado (rol incorrecto) -> 403
+$ curl -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXV…" http://localhost:8000/proveedores
+{"mensaje":"Tu rol no tiene permiso para esta operación.","codigo":"PROHIBIDO"}  -> HTTP 403
+
+### 4. Token válido de Dueña (rol correcto) -> 200
+$ curl -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXV…" http://localhost:8000/proveedores
+{"datos":[{"id":"5c206b68-14ae-4058-9c68-26cfedae086a","nombre":"Proveedor A","tipo":"CON_BD","activo":true},{"id":"f956f526-9f92-4aba-a18b-c999e3504711","nombre":"Proveedor B","tipo":"CON_BD","activo":true},{"id":"62386be4-0120-47dc-b535-f33fcdb5da2e","nombre":"Bimbo ruta","tipo":"MANUAL_RUTA","activo":true},{"id":"24013287-8185-4b20-9338-2f4951e7f267","nombre":"Otro (ruta)","tipo":"OTRO_RUTA","activo":true}]}  -> HTTP 200
+

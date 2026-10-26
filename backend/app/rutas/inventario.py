@@ -7,9 +7,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import modelos as m
-from app.comun import (a_decimal, actor_tienda, auditar, clave_idempotencia, existencia, guardar_respuesta,
+from app.comun import (a_decimal, auditar, clave_idempotencia, existencia, guardar_respuesta,
                        id_de_ruta, json_recepcion, paginar, repetir_si_existe)
 from app.db import obtener_db
+from app.seguridad import TIENDA
 from app.errores import datos_invalidos, no_encontrado
 from app.esquemas import RecepcionCrear
 
@@ -29,7 +30,7 @@ def _resolver_alerta_reorden(db: Session, producto: m.Producto, disponible: int)
 
 @router.post("/recepciones", status_code=201)
 def registrar_recepcion(cuerpo: RecepcionCrear, db: Session = Depends(obtener_db),
-                        actor: m.UsuarioTienda = Depends(actor_tienda),
+                        actor: m.UsuarioTienda = Depends(TIENDA),
                         clave: uuid.UUID = Depends(clave_idempotencia)):
     entrada = cuerpo.model_dump(mode="json")
     repetida = repetir_si_existe(db, clave, "registrar_recepcion", entrada)
@@ -89,7 +90,7 @@ def registrar_recepcion(cuerpo: RecepcionCrear, db: Session = Depends(obtener_db
 @router.get("/recepciones")
 def listar_recepciones(pagina: int = Query(1, ge=1), tamano: int = Query(20, ge=1, le=100),
                        productoId: uuid.UUID | None = None, db: Session = Depends(obtener_db),
-                       actor: m.UsuarioTienda = Depends(actor_tienda)):
+                       actor: m.UsuarioTienda = Depends(TIENDA)):
     consulta = (select(m.Recepcion).join(m.MovimientoInventario, m.Recepcion.movimiento_id == m.MovimientoInventario.id)
                 .order_by(m.MovimientoInventario.fecha_hora.desc()))
     if productoId:
@@ -102,7 +103,7 @@ def listar_recepciones(pagina: int = Query(1, ge=1), tamano: int = Query(20, ge=
 
 @router.get("/recepciones/{recepcion_id}")
 def consultar_recepcion(recepcion_id: str, db: Session = Depends(obtener_db),
-                        actor: m.UsuarioTienda = Depends(actor_tienda)):
+                        actor: m.UsuarioTienda = Depends(TIENDA)):
     recepcion = db.get(m.Recepcion, id_de_ruta(recepcion_id))
     if recepcion is None:
         raise no_encontrado()

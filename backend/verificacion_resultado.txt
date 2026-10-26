@@ -9,13 +9,13 @@ OK    POST /productos → 201  Crear producto restringido
 OK    POST /productos → 201  Crear producto sin código de barras
 OK    GET /productos → 200  Listar fichas
 OK    GET /productos → 400  Tamaño de página fuera de rango
-OK    GET /productos/4920e2fa-1a7c-445a-a186-c4d0d7ef32ed → 200  Consultar ficha
-OK    GET /productos/fad9f18b-5cac-4002-93ad-84c15771c8c0 → 404  Ficha inexistente
+OK    GET /productos/daf19b9f-9aed-4790-a461-8d3befec4020 → 200  Consultar ficha
+OK    GET /productos/b4822fc0-cbc3-4efb-857c-663781c02b2c → 404  Ficha inexistente
 OK    GET /productos/no-es-uuid → 404  Id mal formado
-OK    PUT /productos/25819ef1-17b1-4d04-abb9-41846a52c373 → 200  Editar ficha y precio
-OK    PATCH /productos/25819ef1-17b1-4d04-abb9-41846a52c373/estado → 200  Desactivar producto
-OK    PATCH /productos/25819ef1-17b1-4d04-abb9-41846a52c373/estado → 200  Reactivar producto
-OK    GET /productos/4920e2fa-1a7c-445a-a186-c4d0d7ef32ed/costo → 200  Costo del producto
+OK    PUT /productos/ac4a1b00-54b0-410a-bcb8-27030a59b06e → 200  Editar ficha y precio
+OK    PATCH /productos/ac4a1b00-54b0-410a-bcb8-27030a59b06e/estado → 200  Desactivar producto
+OK    PATCH /productos/ac4a1b00-54b0-410a-bcb8-27030a59b06e/estado → 200  Reactivar producto
+OK    GET /productos/daf19b9f-9aed-4790-a461-8d3befec4020/costo → 200  Costo del producto
 OK    POST /recepciones → 422  Recepción sin Idempotency-Key
 OK    POST /recepciones → 201  Recepción
 OK    POST /recepciones → 201  Reintento con la misma clave
@@ -25,9 +25,9 @@ OK    POST /recepciones → 422  Perecedero sin caducidad
 OK    POST /recepciones → 201  Empleado envía costo (se ignora)
 OK       … costoIgnorado = true y sin costo en la respuesta
 OK    POST /recepciones → 201  Recepción de pan
-OK    GET /productos/4920e2fa-1a7c-445a-a186-c4d0d7ef32ed/lotes → 200  Lotes del producto
+OK    GET /productos/daf19b9f-9aed-4790-a461-8d3befec4020/lotes → 200  Lotes del producto
 OK    GET /recepciones → 200  Listar recepciones
-OK    GET /recepciones/bd2d7c66-2c80-41dd-888b-7bc94b0b8c66 → 200  Consultar recepción
+OK    GET /recepciones/93cf8124-0139-42a5-9a62-5a5a0fd1c823 → 200  Consultar recepción
 OK    GET /inventario/productos → 200  Inventario sin costos
 OK    GET /pos/productos → 200  POS por nombre sin acentos
 OK    GET /pos/productos → 200  POS por código de barras
@@ -35,7 +35,7 @@ OK    GET /pos/productos → 200  POS sin coincidencias
 OK       … mensaje «Producto no encontrado»
 OK    POST /proveedores → 201  Crear proveedor de ruta
 OK    POST /proveedores → 409  Proveedor duplicado
-OK    GET /proveedores/a81e4cc7-1d03-4cd5-a6f7-2feb129ebe0c → 200  Consultar proveedor
+OK    GET /proveedores/24013287-8185-4b20-9338-2f4951e7f267 → 200  Consultar proveedor
 OK    GET /configuracion → 200  Consultar configuración
 OK    PATCH /configuracion → 422  20 días de seguridad
 OK       … mensaje del SRS
@@ -50,37 +50,39 @@ OK    GET /configuracion/codigos-postales/99999 → 404  Código postal inexiste
 OK    GET /usuarios → 200  Listar usuarios de la tienda
 OK    POST /usuarios → 201  Crear empleado
 OK    POST /usuarios → 409  Correo repetido
-OK    GET /usuarios/5d72ff91-dc07-46d8-8f2d-d5efb3b748a6 → 200  Consultar usuario
+OK    GET /usuarios/98cd6b28-7930-40ee-a188-0f30841c4a0b → 200  Consultar usuario
 OK    PATCH /usuarios/22222222-2222-4222-8222-222222222222 → 200  Desactivar al empleado
+OK    GET /pos/productos → 401  Empleado desactivado con token vigente
+OK       … 401 CUENTA_INACTIVA (RF-03-AC-2)
 OK    PATCH /usuarios/22222222-2222-4222-8222-222222222222 → 200  Reactivar al empleado
 OK    PATCH /usuarios/11111111-1111-4111-8111-111111111111 → 409  Desactivar a la última Dueña
-OK    GET /usuarios/17738bd5-8301-46b4-9954-963552c3b46e → 404  Usuario inexistente
+OK    GET /usuarios/6d8d4f54-0ee6-48ba-ad8c-2fd68e6c10c0 → 404  Usuario inexistente
 OK    POST /clientes → 201  Registrar cliente
 OK    POST /clientes → 409  Cliente con correo existente
 OK    POST /clientes → 422  Contraseña sin número
 OK    POST /ventas → 201  Abrir venta
-OK    POST /ventas/063ba851-d715-4116-b70f-e77ab6009489/renglones → 201  Agregar 2 leches
-OK    POST /ventas/063ba851-d715-4116-b70f-e77ab6009489/renglones → 422  Cantidad decimal
-OK    POST /ventas/063ba851-d715-4116-b70f-e77ab6009489/renglones → 422  Cantidad cero
+OK    POST /ventas/37b75db2-8b53-431b-84c7-90c673b2fb24/renglones → 201  Agregar 2 leches
+OK    POST /ventas/37b75db2-8b53-431b-84c7-90c673b2fb24/renglones → 422  Cantidad decimal
+OK    POST /ventas/37b75db2-8b53-431b-84c7-90c673b2fb24/renglones → 422  Cantidad cero
 OK       … mensaje del SRS
-OK    POST /ventas/063ba851-d715-4116-b70f-e77ab6009489/renglones → 201  Agregar pan
-OK    PATCH /ventas/063ba851-d715-4116-b70f-e77ab6009489/renglones/01a17 → 200  Cambiar a 3 leches
-OK    DELETE /ventas/063ba851-d715-4116-b70f-e77ab6009489/renglones/01a17 → 200  Quitar el pan
+OK    POST /ventas/37b75db2-8b53-431b-84c7-90c673b2fb24/renglones → 201  Agregar pan
+OK    PATCH /ventas/37b75db2-8b53-431b-84c7-90c673b2fb24/renglones/01a17 → 200  Cambiar a 3 leches
+OK    DELETE /ventas/37b75db2-8b53-431b-84c7-90c673b2fb24/renglones/01a17 → 200  Quitar el pan
 OK       … total recalculado a 85.50
-OK    POST /ventas/063ba851-d715-4116-b70f-e77ab6009489/confirmaciones → 422  Efectivo insuficiente
+OK    POST /ventas/37b75db2-8b53-431b-84c7-90c673b2fb24/confirmaciones → 422  Efectivo insuficiente
 OK       … informa el faltante 35.50
-OK    POST /ventas/063ba851-d715-4116-b70f-e77ab6009489/confirmaciones → 200  Confirmar en efectivo
+OK    POST /ventas/37b75db2-8b53-431b-84c7-90c673b2fb24/confirmaciones → 200  Confirmar en efectivo
 OK       … folio VTA-…, cambio 14.50
-OK    POST /ventas/063ba851-d715-4116-b70f-e77ab6009489/confirmaciones → 200  Reintento de la confirmación
+OK    POST /ventas/37b75db2-8b53-431b-84c7-90c673b2fb24/confirmaciones → 200  Reintento de la confirmación
 OK       … mismo folio, sin cobrar dos veces
-OK    POST /ventas/063ba851-d715-4116-b70f-e77ab6009489/confirmaciones → 409  Confirmar otra vez con otra clave
-OK    POST /ventas/063ba851-d715-4116-b70f-e77ab6009489/renglones → 409  Agregar renglón a venta confirmada
+OK    POST /ventas/37b75db2-8b53-431b-84c7-90c673b2fb24/confirmaciones → 409  Confirmar otra vez con otra clave
+OK    POST /ventas/37b75db2-8b53-431b-84c7-90c673b2fb24/renglones → 409  Agregar renglón a venta confirmada
 OK    POST /ventas → 201  Abrir otra venta
-OK    POST /ventas/b5cb7b52-c81d-40a2-a9fe-df716e4c79ad/renglones → 201  Pedir 50 leches
-OK    POST /ventas/b5cb7b52-c81d-40a2-a9fe-df716e4c79ad/confirmaciones → 409  Existencia insuficiente
+OK    POST /ventas/bdfaebe1-44bc-4428-9001-b4480a34d7ee/renglones → 201  Pedir 50 leches
+OK    POST /ventas/bdfaebe1-44bc-4428-9001-b4480a34d7ee/confirmaciones → 409  Existencia insuficiente
 OK       … señala producto, solicitada y disponible
 OK    GET /ventas → 200  Buscar venta por folio
-OK    GET /ventas/063ba851-d715-4116-b70f-e77ab6009489 → 200  Consultar venta
+OK    GET /ventas/37b75db2-8b53-431b-84c7-90c673b2fb24 → 200  Consultar venta
 OK    GET /ventas → 200  Listar ventas del día
 OK    GET /carrito → 200  Carrito vacío
 OK    POST /carrito/renglones → 201  Agregar al carrito
@@ -88,11 +90,49 @@ OK    POST /carrito/renglones → 422  Más de lo disponible
 OK       … «Solo hay N disponibles»
 OK    POST /carrito/renglones → 422  Producto restringido
 OK       … «Producto no disponible en línea»
-OK    PATCH /carrito/renglones/01a1751f-ce12-7000-9a0b-bda10b66d4a3 → 200  Cambiar cantidad en el carrito
+OK    PATCH /carrito/renglones/01a175a7-b987-7000-b7e2-805c00c95cd6 → 200  Cambiar cantidad en el carrito
 OK    POST /carrito/renglones → 201  Agregar pan al carrito
-OK    DELETE /carrito/renglones/01a1751f-ce12-7000-9a0b-bda10b66d4a3 → 200  Quitar la leche del carrito
-OK    DELETE /carrito/renglones/f1878bb7-fa07-48cb-9f94-aade96c2886e → 404  Renglón de carrito inexistente
+OK    DELETE /carrito/renglones/01a175a7-b987-7000-b7e2-805c00c95cd6 → 200  Quitar la leche del carrito
+OK    DELETE /carrito/renglones/009cac73-4577-4143-a8f2-d88d5417e3e8 → 404  Renglón de carrito inexistente
 OK    DELETE /carrito → 200  Vaciar carrito
+OK    POST /api/auth/register → 201  Registro (alias de la actividad)
+OK       … la respuesta no trae contraseña ni hash
+OK    POST /api/auth/register → 422  Contraseña de más de 72 bytes
+OK    POST /api/auth/login → 200  Login (alias de la actividad)
+OK       … JWT con exp explícito: 24 h para Cliente, rol y sub
+OK       … JWT de la Dueña dura 60 min
+OK    GET /api/auth/me → 200  Me (alias de la actividad)
+OK       … devuelve al usuario del token
+OK    GET /auth/yo → 200  Me (ruta del contrato)
+OK    POST /auth/sesiones → 401  Contraseña incorrecta
+OK    POST /auth/sesiones → 401  Correo inexistente
+OK       … mismo mensaje en los dos casos (no revela si el correo existe)
+OK    POST /auth/sesiones → 429  Sexto intento tras 5 fallos
+OK       … 429 con reintentaEnSegundos (RF-01-AC-5)
+OK    POST /auth/sesiones → 200  Otro correo desde la misma IP no se bloquea
+OK    GET /productos → 401  Ruta protegida sin token
+OK       … encabezado WWW-Authenticate: Bearer
+OK    GET /productos → 401  Esquema distinto a Bearer
+OK    GET /productos → 401  Token con un carácter modificado
+OK       … TOKEN_INVALIDO
+OK    GET /productos → 401  Token expirado (firma correcta)
+OK       … TOKEN_EXPIRADO
+OK    GET /productos → 401  Token firmado con otro secreto
+OK    GET /productos → 401  Token con alg none
+OK    GET /productos → 401  Empleado que se cambia el rol a DUENO en el token
+OK    GET /productos → 403  Empleado en ruta de Dueño
+OK    GET /productos/daf19b9f-9aed-4790-a461-8d3befec4020/costo → 403  Empleado pide el costo (RF-01-AC-3)
+OK    PATCH /configuracion → 403  Empleado cambia configuración
+OK    GET /pos/productos → 200  Empleado en ruta de tienda
+OK    POST /ventas → 403  Cliente en ruta de tienda
+OK    POST /productos → 403  Cliente crea producto
+OK    GET /carrito → 403  Dueña en el carrito (solo Cliente)
+OK    GET /carrito → 200  Cliente en su carrito
+OK    POST /usuarios → 201  Dueña crea un empleado
+OK    POST /auth/sesiones → 401  Login antes de activar
+OK    POST /usuarios/activacion → 200  Activar la cuenta
+OK    POST /usuarios/activacion → 422  Reusar el enlace
+OK    POST /auth/sesiones → 200  Login después de activar
 OK    BD   Lotes de leche: 15 recibidas, 3 vendidas, quedan 12
 OK    BD   FEFO: salió del lote que caduca primero (2030-01-10)
 OK    BD   La venta quedó COMPLETADA con folio y fecha
@@ -102,5 +142,8 @@ OK    BD   Auditoría escrita en la misma transacción
 OK    BD   Claves de idempotencia guardadas
 OK    BD   Configuración persistió (3 días, envío 30.00)
 OK    BD   El carrito quedó vacío
+OK    BD   Contraseñas guardadas con bcrypt ($2b$, costo 12)
+OK    BD   Ningún token de activación en claro
+OK    BD   Intentos de login registrados
 
-104/104 verificaciones correctas (83 peticiones).
+147/147 verificaciones correctas (113 peticiones).

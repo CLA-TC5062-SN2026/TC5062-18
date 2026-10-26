@@ -4,8 +4,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import modelos as m
-from app.comun import a_decimal, a_hora, actor_tienda, auditar, json_configuracion
+from app.comun import a_decimal, a_hora, auditar, json_configuracion
 from app.db import obtener_db
+from app.seguridad import DUENO
 from app.errores import ErrorApi, datos_invalidos, no_encontrado
 from app.esquemas import CodigoPostalCrear, CodigoPostalEstado, ConfiguracionActualizar
 
@@ -34,14 +35,14 @@ def _json_codigo(c: m.CodigoPostalEntrega) -> dict:
     return {"codigo": c.codigo, "activo": c.activo}
 
 
-@router.get("/configuracion")
+@router.get("/configuracion", dependencies=[Depends(DUENO)])
 def consultar_configuracion(db: Session = Depends(obtener_db)):
     return json_configuracion(db, _configuracion(db))
 
 
 @router.patch("/configuracion")
 def actualizar_configuracion(cuerpo: ConfiguracionActualizar, db: Session = Depends(obtener_db),
-                             actor: m.UsuarioTienda = Depends(actor_tienda)):
+                             actor: m.UsuarioTienda = Depends(DUENO)):
     """Solo cambia lo que se envía. El costo de envío nuevo aplica a pedidos creados después."""
     config = _configuracion(db, bloquear=True)
     anterior, nuevo = {}, {}
@@ -62,7 +63,7 @@ def actualizar_configuracion(cuerpo: ConfiguracionActualizar, db: Session = Depe
     return json_configuracion(db, config)
 
 
-@router.get("/configuracion/codigos-postales")
+@router.get("/configuracion/codigos-postales", dependencies=[Depends(DUENO)])
 def listar_codigos(db: Session = Depends(obtener_db)):
     filas = db.scalars(select(m.CodigoPostalEntrega).order_by(m.CodigoPostalEntrega.codigo)).all()
     return {"datos": [_json_codigo(c) for c in filas]}
@@ -70,7 +71,7 @@ def listar_codigos(db: Session = Depends(obtener_db)):
 
 @router.post("/configuracion/codigos-postales", status_code=201)
 def agregar_codigo(cuerpo: CodigoPostalCrear, db: Session = Depends(obtener_db),
-                   actor: m.UsuarioTienda = Depends(actor_tienda)):
+                   actor: m.UsuarioTienda = Depends(DUENO)):
     if db.get(m.CodigoPostalEntrega, cuerpo.codigo):
         raise ErrorApi(409, "CODIGO_POSTAL_DUPLICADO",
                        "El código postal ya existe. Para reactivarlo usa PATCH sobre ese código.")
@@ -82,7 +83,7 @@ def agregar_codigo(cuerpo: CodigoPostalCrear, db: Session = Depends(obtener_db),
     return _json_codigo(codigo)
 
 
-@router.get("/configuracion/codigos-postales/{codigo}")
+@router.get("/configuracion/codigos-postales/{codigo}", dependencies=[Depends(DUENO)])
 def consultar_codigo(codigo: str, db: Session = Depends(obtener_db)):
     fila = db.get(m.CodigoPostalEntrega, codigo) if codigo.isdigit() and len(codigo) == 5 else None
     if fila is None:
@@ -92,7 +93,7 @@ def consultar_codigo(codigo: str, db: Session = Depends(obtener_db)):
 
 @router.patch("/configuracion/codigos-postales/{codigo}")
 def cambiar_codigo(codigo: str, cuerpo: CodigoPostalEstado, db: Session = Depends(obtener_db),
-                   actor: m.UsuarioTienda = Depends(actor_tienda)):
+                   actor: m.UsuarioTienda = Depends(DUENO)):
     """Desactivar no borra el registro; los pedidos ya creados conservan su dirección."""
     fila = db.get(m.CodigoPostalEntrega, codigo) if codigo.isdigit() and len(codigo) == 5 else None
     if fila is None:

@@ -4,15 +4,16 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import modelos as m
-from app.comun import actor_tienda, auditar, id_de_ruta, json_proveedor
+from app.comun import auditar, id_de_ruta, json_proveedor
 from app.db import obtener_db
+from app.seguridad import DUENO
 from app.errores import ErrorApi, no_encontrado
 from app.esquemas import ProveedorCrear
 
 router = APIRouter(tags=["Proveedores"])
 
 
-@router.get("/proveedores")
+@router.get("/proveedores", dependencies=[Depends(DUENO)])
 def listar_proveedores(db: Session = Depends(obtener_db)):
     filas = db.scalars(select(m.Proveedor).order_by(m.Proveedor.tipo, m.Proveedor.nombre)).all()
     return {"datos": [json_proveedor(p) for p in filas]}
@@ -20,7 +21,7 @@ def listar_proveedores(db: Session = Depends(obtener_db)):
 
 @router.post("/proveedores", status_code=201)
 def crear_proveedor(cuerpo: ProveedorCrear, db: Session = Depends(obtener_db),
-                    actor: m.UsuarioTienda = Depends(actor_tienda)):
+                    actor: m.UsuarioTienda = Depends(DUENO)):
     repetido = db.scalar(select(m.Proveedor.id).where(
         m.Proveedor.activo, func.f_normaliza(m.Proveedor.nombre) == func.f_normaliza(cuerpo.nombre)))
     if repetido:
@@ -34,7 +35,7 @@ def crear_proveedor(cuerpo: ProveedorCrear, db: Session = Depends(obtener_db),
     return json_proveedor(proveedor)
 
 
-@router.get("/proveedores/{proveedor_id}")
+@router.get("/proveedores/{proveedor_id}", dependencies=[Depends(DUENO)])
 def consultar_proveedor(proveedor_id: str, db: Session = Depends(obtener_db)):
     proveedor = db.get(m.Proveedor, id_de_ruta(proveedor_id))
     if proveedor is None:

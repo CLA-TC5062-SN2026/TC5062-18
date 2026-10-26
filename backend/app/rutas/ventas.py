@@ -10,10 +10,11 @@ from sqlalchemy import or_, select, text
 from sqlalchemy.orm import Session
 
 from app import modelos as m
-from app.comun import (TZ_MX, a_decimal, actor_tienda, ahora, auditar, clave_idempotencia, dinero,
+from app.comun import (TZ_MX, a_decimal, ahora, auditar, clave_idempotencia, dinero,
                        existencias, guardar_respuesta, hoy_mx, id_de_ruta, json_venta, paginar,
                        repetir_si_existe)
 from app.db import obtener_db
+from app.seguridad import TIENDA
 from app.errores import ErrorApi, datos_invalidos, no_encontrado
 from app.esquemas import ConfirmarVenta, RenglonCantidad, RenglonVentaCrear
 
@@ -48,7 +49,7 @@ def _renglon(venta: m.Venta, renglon_id: str) -> m.RenglonVenta:
 
 
 @router.post("/ventas", status_code=201)
-def crear_venta(db: Session = Depends(obtener_db), actor: m.UsuarioTienda = Depends(actor_tienda)):
+def crear_venta(db: Session = Depends(obtener_db), actor: m.UsuarioTienda = Depends(TIENDA)):
     """Borrador sin folio y sin tocar existencias. El total empieza en 0.00."""
     venta = m.Venta(estado="BORRADOR", diferida=False, total=Decimal("0.00"),
                     usuario_responsable_id=actor.usuario_id)
@@ -57,7 +58,7 @@ def crear_venta(db: Session = Depends(obtener_db), actor: m.UsuarioTienda = Depe
     return json_venta(_venta(db, str(venta.id)))
 
 
-@router.get("/ventas")
+@router.get("/ventas", dependencies=[Depends(TIENDA)])
 def listar_ventas(pagina: int = Query(1, ge=1), tamano: int = Query(20, ge=1, le=100),
                   estado: str | None = Query(None, pattern="^(BORRADOR|COMPLETADA|CANCELADA)$"),
                   fecha: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
@@ -78,12 +79,12 @@ def listar_ventas(pagina: int = Query(1, ge=1), tamano: int = Query(20, ge=1, le
     return {"datos": [json_venta(v) for v in filas], "pagina": pagina, "tamano": tamano, "total": total}
 
 
-@router.get("/ventas/{venta_id}")
+@router.get("/ventas/{venta_id}", dependencies=[Depends(TIENDA)])
 def consultar_venta(venta_id: str, db: Session = Depends(obtener_db)):
     return json_venta(_venta(db, venta_id))
 
 
-@router.post("/ventas/{venta_id}/renglones", status_code=201)
+@router.post("/ventas/{venta_id}/renglones", status_code=201, dependencies=[Depends(TIENDA)])
 def agregar_renglon(venta_id: str, cuerpo: RenglonVentaCrear, db: Session = Depends(obtener_db)):
     venta = _venta(db, venta_id, bloquear=True)
     _en_curso(venta)
@@ -98,7 +99,7 @@ def agregar_renglon(venta_id: str, cuerpo: RenglonVentaCrear, db: Session = Depe
     return json_venta(_venta(db, venta_id))
 
 
-@router.patch("/ventas/{venta_id}/renglones/{renglon_id}")
+@router.patch("/ventas/{venta_id}/renglones/{renglon_id}", dependencies=[Depends(TIENDA)])
 def cambiar_renglon(venta_id: str, renglon_id: str, cuerpo: RenglonCantidad, db: Session = Depends(obtener_db)):
     venta = _venta(db, venta_id, bloquear=True)
     renglon = _renglon(venta, renglon_id)
@@ -110,7 +111,7 @@ def cambiar_renglon(venta_id: str, renglon_id: str, cuerpo: RenglonCantidad, db:
     return json_venta(_venta(db, venta_id))
 
 
-@router.delete("/ventas/{venta_id}/renglones/{renglon_id}")
+@router.delete("/ventas/{venta_id}/renglones/{renglon_id}", dependencies=[Depends(TIENDA)])
 def quitar_renglon(venta_id: str, renglon_id: str, db: Session = Depends(obtener_db)):
     venta = _venta(db, venta_id, bloquear=True)
     renglon = _renglon(venta, renglon_id)
@@ -142,7 +143,7 @@ def _actualizar_alerta_reorden(db: Session, producto: m.Producto, disponible: in
 
 @router.post("/ventas/{venta_id}/confirmaciones")
 def confirmar_venta(venta_id: str, cuerpo: ConfirmarVenta, db: Session = Depends(obtener_db),
-                    actor: m.UsuarioTienda = Depends(actor_tienda),
+                    actor: m.UsuarioTienda = Depends(TIENDA),
                     clave: uuid.UUID = Depends(clave_idempotencia)):
     """Una sola transacción: valida el pago, bloquea cada producto, descuenta
     con FEFO, guarda de qué lote salió cada unidad, asigna folio y audita."""
