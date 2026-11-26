@@ -8,8 +8,9 @@ Python 3.10 o más reciente, FastAPI, SQLAlchemy 2 y PostgreSQL 16. Implementa l
 # 1. Base de datos (una vez)
 createuser -P tiendinet            # contraseña: la que pongas en .env
 createdb -O tiendinet tiendinet
-psql -U tiendinet -d tiendinet -f ../esquema_bd.sql
+psql -U tiendinet -d tiendinet -f ../S05_S06_A1/esquema_bd.sql
 psql -U tiendinet -d tiendinet -f datos_prueba.sql
+python cargar_datos_demo.py        # opcional, con la API arriba: productos, lotes y ventas para la demo
 
 # 2. Dependencias y variables
 python -m venv .venv && source .venv/bin/activate   # en Windows: .venv\Scripts\activate
@@ -48,7 +49,7 @@ Variables de entorno de seguridad: `JWT_SECRET` (obligatoria, 32 caracteres o m�
 
 ## Qué cubre
 
-38 operaciones CRUD en 7 módulos, los mismos de la arquitectura de equipo, más las de autenticación (inicio de sesión, usuario actual, activación y los alias de la actividad):
+40 operaciones en 8 módulos (los de la arquitectura de equipo más las alertas), además de las de autenticación (inicio de sesión, usuario actual, activación y los alias de la actividad):
 
 | Módulo | Operaciones |
 |---|---|
@@ -57,22 +58,23 @@ Variables de entorno de seguridad: `JWT_SECRET` (obligatoria, 32 caracteres o m�
 | Recepciones | `POST`, `GET /recepciones`; `GET /recepciones/{id}` |
 | Proveedores | `GET`, `POST /proveedores`; `GET /proveedores/{id}` |
 | Configuración | `GET`, `PATCH /configuracion`; `GET`, `POST /configuracion/codigos-postales`; `GET`, `PATCH .../{codigo}` |
-| Punto de venta | `POST`, `GET /ventas`; `GET /ventas/{id}`; `POST`, `PATCH`, `DELETE` de renglones; `POST .../confirmaciones` (FEFO) |
+| Punto de venta | `POST`, `GET /ventas`; `GET /ventas/{id}`; `POST`, `PATCH`, `DELETE` de renglones; `POST .../confirmaciones` (FEFO); `GET /cortes-caja/vista-previa` |
+| Alertas | `GET /alertas` (reorden, con el proveedor sugerido solo para el Dueño) |
 | Carrito | `GET`, `DELETE /carrito`; `POST /carrito/renglones`; `PATCH`, `DELETE /carrito/renglones/{id}` |
 
 El «Delete» de producto, proveedor, usuario y código postal es un cambio de estado, porque el contrato no los borra (RNF-14). Los `DELETE` reales del contrato son los de renglones de venta y del carrito, y están implementados.
 
-Quedan para las siguientes semanas: pedidos, pagos y webhook, reembolsos, sincronización de proveedores, ofertas, propuestas, ajustes, alertas, cortes, tareas del reloj y reportes.
+Quedan para las siguientes semanas: pedidos, pagos y webhook, reembolsos, sincronización de proveedores, ofertas, propuestas, ajustes, el detalle de una alerta, el cierre del corte, tareas del reloj y reportes.
 
 ## Verificación
 
 ```bash
-python verificar_roles.py ../openapi_equipo.yaml    # cada ruta tiene el rol que dice el contrato
+python verificar_roles.py ../S09_A1/openapi_equipo.yaml    # cada ruta tiene el rol que dice el contrato
 ./pruebas_seguridad.sh                             # 401 sin token, 401 token alterado, 403 rol, 200
 ```
 
 ```bash
-python verificar_api.py http://localhost:8000 ../openapi_equipo.yaml
+python verificar_api.py http://localhost:8000 ../S09_A1/openapi_equipo.yaml
 ```
 
 `verificar_api.py` ejecuta 113 peticiones, de éxito, de error y de seguridad. Por cada respuesta comprueba que la ruta exista en el contrato, que el código HTTP esté declarado y que el cuerpo valide contra el schema. Al final revisa en PostgreSQL que los datos persistieron y que las contraseñas se guardaron con bcrypt. Resultado: 147/147. Necesita una base recién cargada.

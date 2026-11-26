@@ -79,6 +79,23 @@ def listar_ventas(pagina: int = Query(1, ge=1), tamano: int = Query(20, ge=1, le
     return {"datos": [json_venta(v) for v in filas], "pagina": pagina, "tamano": tamano, "total": total}
 
 
+@router.get("/cortes-caja/vista-previa", dependencies=[Depends(TIENDA)])
+def vista_previa_corte(fecha: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+                       db: Session = Depends(obtener_db)):
+    """RF-20-AC-1 y AC-2: efectivo esperado del día con las ventas completadas que aún
+    no están en un corte. La tarjeta se informa aparte. Las canceladas no suman."""
+    dia = datetime.fromisoformat(fecha).date() if fecha else hoy_mx()
+    inicio = datetime.combine(dia, time.min, TZ_MX)
+    fin = datetime.combine(dia, time.max, TZ_MX)
+    ventas = db.scalars(select(m.Venta).where(
+        m.Venta.estado == "COMPLETADA", m.Venta.corte_id.is_(None),
+        m.Venta.fecha_hora.between(inicio, fin)).order_by(m.Venta.fecha_hora)).unique().all()
+    efectivo = sum((v.total for v in ventas if v.forma_pago == "EFECTIVO"), Decimal("0.00"))
+    tarjeta = sum((v.total for v in ventas if v.forma_pago != "EFECTIVO"), Decimal("0.00"))
+    return {"fecha": dia.isoformat(), "efectivoEsperado": dinero(efectivo), "totalTarjeta": dinero(tarjeta),
+            "ventasEnLineaExcluidas": True, "ventasIds": [str(v.id) for v in ventas]}
+
+
 @router.get("/ventas/{venta_id}", dependencies=[Depends(TIENDA)])
 def consultar_venta(venta_id: str, db: Session = Depends(obtener_db)):
     return json_venta(_venta(db, venta_id))
@@ -126,7 +143,8 @@ def _actualizar_alerta_reorden(db: Session, producto: m.Producto, disponible: in
     """RF-09: si la disponible queda en o bajo el PR, una sola alerta activa por producto."""
     if disponible > producto.pr_vigente:
         return None
-    sugerida = max(producto.pr_vigente * 2 - disponible, 1)
+    # SRS 1.3: techo de CDP × 7 si hay CDP; sin CDP (aún no se calcula), PR − disponible + 1.
+    sugerida = producto.pr_vigente - disponible + 1
     alerta = db.scalars(select(m.Alerta).where(m.Alerta.producto_id == producto.id, m.Alerta.tipo == "REORDEN",
                                                m.Alerta.estado == "ACTIVA").with_for_update()).first()
     if alerta is None:

@@ -7,11 +7,14 @@ import { RutaProtegida } from '@/components/RutaProtegida'
 import { NoEncontradoPage } from '@/pages/NoEncontradoPage'
 import { DashboardPage } from '@/pages/tienda/DashboardPage'
 import { LoginPage, RUTA_DASHBOARD } from '@/pages/tienda/LoginPage'
+import { RUTA_PRODUCTOS } from '@/pages/tienda/navegacion'
+import { ProductosPage } from '@/pages/tienda/ProductosPage'
 import './index.css'
 
 // Rutas del Portal Tienda (relativas a /tienda):
 //   /login       pública
 //   /dashboard   protegida (Dueño y Empleado)
+//   /productos   protegida (solo Dueño: muestra costos, RF-01-AC-3)
 //   /            redirige al dashboard; si no hay sesión, la ruta protegida manda al login
 const router = createBrowserRouter(
   [
@@ -22,6 +25,10 @@ const router = createBrowserRouter(
         { path: '/', element: <Navigate to={RUTA_DASHBOARD} replace /> },
         { path: RUTA_DASHBOARD, element: <DashboardPage /> },
       ],
+    },
+    {
+      element: <RutaProtegida roles={['DUENO']} />,
+      children: [{ path: RUTA_PRODUCTOS, element: <ProductosPage /> }],
     },
     { path: '*', element: <NoEncontradoPage /> },
   ],

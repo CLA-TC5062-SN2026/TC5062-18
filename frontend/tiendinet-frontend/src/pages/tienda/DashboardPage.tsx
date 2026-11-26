@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { useNavigate } from 'react-router'
+import { Link, useNavigate } from 'react-router'
 import { Navbar } from '@/components/Navbar'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -9,11 +9,14 @@ import { useVistaPreviaCorte } from '@/services/cortesCajaService'
 import { useAlertasReordenActivas } from '@/services/inventarioService'
 import type { ErrorApi } from '@/services/api/errores'
 import { useSesion } from '@/stores/sesion'
+import { enlacesTienda, RUTA_PRODUCTOS } from './navegacion'
 
 interface Modulo {
   titulo: string
   descripcion: string
   soloDueno?: boolean
+  /** Ruta de la pantalla, si ya existe. */
+  href?: string
 }
 
 // El Empleado no ve costos, ofertas ni punto de reorden (RF-01-AC-3).
@@ -21,7 +24,7 @@ const MODULOS: Modulo[] = [
   { titulo: 'Mostrador', descripcion: 'Venta con lector y ticket' },
   { titulo: 'Pedidos', descripcion: 'Pedidos anticipados de clientes' },
   { titulo: 'Corte de caja', descripcion: 'Cierre del turno' },
-  { titulo: 'Inventario y reorden', descripcion: 'Existencias y punto de reorden', soloDueno: true },
+  { titulo: 'Inventario y reorden', descripcion: 'Productos, existencias y punto de reorden', soloDueno: true, href: RUTA_PRODUCTOS },
   { titulo: 'Costos y ofertas', descripcion: 'Precios de proveedores y promociones', soloDueno: true },
 ]
 
@@ -67,7 +70,7 @@ export function DashboardPage() {
       <Navbar
         portal="Tienda"
         usuario={usuario}
-        enlaces={[{ etiqueta: 'Dashboard', href: '/dashboard', requiereSesion: true }]}
+        enlaces={enlacesTienda(usuario?.rol)}
         onIniciarSesion={() => navigate('/login')}
         onCerrarSesion={authService.logout}
       />
@@ -134,14 +137,27 @@ export function DashboardPage() {
             Módulos
           </h2>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {modulos.map((m) => (
-              <Card key={m.titulo}>
-                <CardHeader>
-                  <CardTitle as="h3">{m.titulo}</CardTitle>
-                  <CardDescription>{m.descripcion}</CardDescription>
-                </CardHeader>
-              </Card>
-            ))}
+            {modulos.map((m) => {
+              const tarjeta = (
+                <Card className={m.href ? 'h-full transition-colors hover:border-primary' : 'h-full'}>
+                  <CardHeader>
+                    <CardTitle as="h3">{m.titulo}</CardTitle>
+                    <CardDescription>{m.descripcion}</CardDescription>
+                  </CardHeader>
+                </Card>
+              )
+              return m.href ? (
+                <Link
+                  key={m.titulo}
+                  to={m.href}
+                  className="rounded-xl focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-hidden"
+                >
+                  {tarjeta}
+                </Link>
+              ) : (
+                <div key={m.titulo}>{tarjeta}</div>
+              )
+            })}
           </div>
         </section>
       </main>

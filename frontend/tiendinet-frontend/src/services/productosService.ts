@@ -1,3 +1,4 @@
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { CuerpoDe, QueryDe } from '@/types/api'
 import { api, datos } from './api/cliente'
 
@@ -74,4 +75,40 @@ export async function actualizarDiasEntregaRespaldo(
   cuerpo: CuerpoDe<'actualizarDiasEntregaRespaldo'>,
 ) {
   return datos(await api.PATCH('/productos/{productoId}/dias-entrega-respaldo', { ...ruta(productoId), body: cuerpo }))
+}
+
+// Hooks de la pantalla de productos (Dueño)
+
+/** Lista de fichas con búsqueda y filtro por estado (RF-04-AC-1). */
+export function useProductos(query: QueryDe<'listarProductos'> = {}) {
+  return useQuery({
+    queryKey: ['productos', query],
+    queryFn: () => listarProductos(query),
+    placeholderData: keepPreviousData,
+  })
+}
+
+/** Crea (sin id) o reemplaza (con id) una ficha. El formulario muestra sus errores. */
+export function useGuardarProducto() {
+  const cliente = useQueryClient()
+  return useMutation({
+    mutationFn: (entrada: { id?: string; cuerpo: CuerpoDe<'crearProducto'> }) => {
+      if (!entrada.id) return crearProducto(entrada.cuerpo)
+      // PUT no recibe el PR inicial ni los días de respaldo: se cambian en su propio endpoint.
+      const { prInicial: _pr, diasEntregaRespaldo: _dias, ...reemplazo } = entrada.cuerpo
+      return reemplazarProducto(entrada.id, reemplazo)
+    },
+    meta: { avisoGlobal: false },
+    onSuccess: () => cliente.invalidateQueries({ queryKey: ['productos'] }),
+  })
+}
+
+/** Activa o desactiva una ficha. La baja es lógica: las ventas pasadas se conservan (RNF-14). */
+export function useCambiarEstadoProducto() {
+  const cliente = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, estado }: { id: string; estado: 'ACTIVO' | 'INACTIVO' }) =>
+      cambiarEstadoProducto(id, { estado }),
+    onSuccess: () => cliente.invalidateQueries({ queryKey: ['productos'] }),
+  })
 }

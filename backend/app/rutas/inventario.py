@@ -108,3 +108,35 @@ def consultar_recepcion(recepcion_id: str, db: Session = Depends(obtener_db),
     if recepcion is None:
         raise no_encontrado()
     return json_recepcion(recepcion, con_costo=actor.rol == "DUENO")
+
+
+@router.get("/alertas")
+def listar_alertas(pagina: int = Query(1, ge=1), tamano: int = Query(20, ge=1, le=100),
+                   tipo: str | None = Query(None, pattern="^(REORDEN|CADUCIDAD)$"),
+                   estado: str | None = Query(None, pattern="^(ACTIVA|RESUELTA)$"),
+                   db: Session = Depends(obtener_db), actor: m.UsuarioTienda = Depends(TIENDA)):
+    """RF-09: alertas del panel. El proveedor sugerido solo lo recibe el Dueño."""
+    consulta = select(m.Alerta).order_by(m.Alerta.fecha.desc(), m.Alerta.id)
+    if tipo:
+        consulta = consulta.where(m.Alerta.tipo == tipo)
+    if estado:
+        consulta = consulta.where(m.Alerta.estado == estado)
+    filas, total = paginar(db, consulta, pagina, tamano)
+    nombres = {p.id: f"{p.nombre} {p.presentacion}" for p in db.scalars(
+        select(m.Producto).where(m.Producto.id.in_({a.producto_id for a in filas if a.producto_id})))}
+    proveedores = {p.id: p.nombre for p in db.scalars(
+        select(m.Proveedor).where(m.Proveedor.id.in_({a.proveedor_sugerido_id for a in filas
+                                                     if a.proveedor_sugerido_id})))}
+    es_dueno = actor.rol == "DUENO"
+    datos = [{
+        "id": str(a.id), "tipo": a.tipo, "estado": a.estado,
+        "productoId": str(a.producto_id) if a.producto_id else None,
+        "nombreProducto": nombres.get(a.producto_id),
+        "loteId": str(a.lote_id) if a.lote_id else None,
+        "existenciaDisponible": a.existencia_disponible, "puntoReorden": a.punto_reorden,
+        "cantidadSugerida": a.cantidad_sugerida,
+        "proveedorSugeridoId": str(a.proveedor_sugerido_id) if es_dueno and a.proveedor_sugerido_id else None,
+        "proveedorSugeridoNombre": proveedores.get(a.proveedor_sugerido_id) if es_dueno else None,
+        "fecha": a.fecha.isoformat(),
+    } for a in filas]
+    return {"datos": datos, "pagina": pagina, "tamano": tamano, "total": total}

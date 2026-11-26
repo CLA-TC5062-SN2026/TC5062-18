@@ -1,0 +1,236 @@
+# Corrida de verificación, 25/11/2026 12:18 (America/Mexico_City)
+# Entorno: Ubuntu 24.04, PostgreSQL 16.15, Python 3.13.18, Node v22.23.5
+# Base recién cargada con S05_S06_A1/esquema_bd.sql y backend/datos_prueba.sql
+
+## 1. backend/verificar_api.py (contrato, reglas y persistencia)
+
+OK    GET /proveedores → 200  Proveedores sembrados
+OK    POST /productos → 201  Crear producto
+OK    POST /productos → 409  Código de barras duplicado
+OK    POST /productos → 409  Mismo nombre y presentación con acento y espacios
+OK    POST /productos → 422  Precio negativo
+OK    POST /productos → 422  Campo desconocido
+OK    POST /productos → 400  JSON mal formado
+OK    POST /productos → 201  Crear producto restringido
+OK    POST /productos → 201  Crear producto sin código de barras
+OK    GET /productos → 200  Listar fichas
+OK    GET /productos → 400  Tamaño de página fuera de rango
+OK    GET /productos/021e88b3-a80c-418d-a8b1-0b964c85bf72 → 200  Consultar ficha
+OK    GET /productos/88f96316-31e5-4990-b0c8-2c3c0fb7583f → 404  Ficha inexistente
+OK    GET /productos/no-es-uuid → 404  Id mal formado
+OK    PUT /productos/b20ed3f3-4421-40e4-827d-74a0d724b20a → 200  Editar ficha y precio
+OK    PATCH /productos/b20ed3f3-4421-40e4-827d-74a0d724b20a/estado → 200  Desactivar producto
+OK    PATCH /productos/b20ed3f3-4421-40e4-827d-74a0d724b20a/estado → 200  Reactivar producto
+OK    GET /productos/021e88b3-a80c-418d-a8b1-0b964c85bf72/costo → 200  Costo del producto
+OK    POST /recepciones → 422  Recepción sin Idempotency-Key
+OK    POST /recepciones → 201  Recepción
+OK    POST /recepciones → 201  Reintento con la misma clave
+OK       … el reintento devuelve la misma recepción y no crea otra
+OK    POST /recepciones → 409  Misma clave con otro cuerpo
+OK    POST /recepciones → 422  Perecedero sin caducidad
+OK    POST /recepciones → 201  Empleado envía costo (se ignora)
+OK       … costoIgnorado = true y sin costo en la respuesta
+OK    POST /recepciones → 201  Recepción de pan
+OK    GET /productos/021e88b3-a80c-418d-a8b1-0b964c85bf72/lotes → 200  Lotes del producto
+OK    GET /recepciones → 200  Listar recepciones
+OK    GET /recepciones/9face55d-4bb3-4ad0-8dfe-0a81ce9ac1f1 → 200  Consultar recepción
+OK    GET /inventario/productos → 200  Inventario sin costos
+OK    GET /pos/productos → 200  POS por nombre sin acentos
+OK    GET /pos/productos → 200  POS por código de barras
+OK    GET /pos/productos → 200  POS sin coincidencias
+OK       … mensaje «Producto no encontrado»
+OK    POST /proveedores → 201  Crear proveedor de ruta
+OK    POST /proveedores → 409  Proveedor duplicado
+OK    GET /proveedores/98f0fa05-af2a-4409-a2f7-a114156349a9 → 200  Consultar proveedor
+OK    GET /configuracion → 200  Consultar configuración
+OK    PATCH /configuracion → 422  20 días de seguridad
+OK       … mensaje del SRS
+OK    PATCH /configuracion → 422  Configuración sin campos
+OK    PATCH /configuracion → 200  Cambiar días de seguridad y costo de envío
+OK    GET /configuracion/codigos-postales → 200  Listar códigos postales
+OK    POST /configuracion/codigos-postales → 201  Agregar código postal
+OK    POST /configuracion/codigos-postales → 409  Código postal repetido
+OK    GET /configuracion/codigos-postales/72100 → 200  Consultar código postal
+OK    PATCH /configuracion/codigos-postales/72100 → 200  Desactivar código postal
+OK    GET /configuracion/codigos-postales/99999 → 404  Código postal inexistente
+OK    GET /usuarios → 200  Listar usuarios de la tienda
+OK    POST /usuarios → 201  Crear empleado
+OK    POST /usuarios → 409  Correo repetido
+OK    GET /usuarios/d06bee18-e8dc-45da-8291-3278375b8bad → 200  Consultar usuario
+OK    PATCH /usuarios/22222222-2222-4222-8222-222222222222 → 200  Desactivar al empleado
+OK    GET /pos/productos → 401  Empleado desactivado con token vigente
+OK       … 401 CUENTA_INACTIVA (RF-03-AC-2)
+OK    PATCH /usuarios/22222222-2222-4222-8222-222222222222 → 200  Reactivar al empleado
+OK    PATCH /usuarios/11111111-1111-4111-8111-111111111111 → 409  Desactivar a la última Dueña
+OK    GET /usuarios/3bd51cf8-9088-4908-83f8-efd9f4fda417 → 404  Usuario inexistente
+OK    POST /clientes → 201  Registrar cliente
+OK    POST /clientes → 409  Cliente con correo existente
+OK    POST /clientes → 422  Contraseña sin número
+OK    POST /ventas → 201  Abrir venta
+OK    POST /ventas/b5710b17-4251-490b-9cfb-00e90c88d199/renglones → 201  Agregar 2 leches
+OK    POST /ventas/b5710b17-4251-490b-9cfb-00e90c88d199/renglones → 422  Cantidad decimal
+OK    POST /ventas/b5710b17-4251-490b-9cfb-00e90c88d199/renglones → 422  Cantidad cero
+OK       … mensaje del SRS
+OK    POST /ventas/b5710b17-4251-490b-9cfb-00e90c88d199/renglones → 201  Agregar pan
+OK    PATCH /ventas/b5710b17-4251-490b-9cfb-00e90c88d199/renglones/01a21 → 200  Cambiar a 3 leches
+OK    DELETE /ventas/b5710b17-4251-490b-9cfb-00e90c88d199/renglones/01a21 → 200  Quitar el pan
+OK       … total recalculado a 85.50
+OK    POST /ventas/b5710b17-4251-490b-9cfb-00e90c88d199/confirmaciones → 422  Efectivo insuficiente
+OK       … informa el faltante 35.50
+OK    POST /ventas/b5710b17-4251-490b-9cfb-00e90c88d199/confirmaciones → 200  Confirmar en efectivo
+OK       … folio VTA-…, cambio 14.50
+OK    POST /ventas/b5710b17-4251-490b-9cfb-00e90c88d199/confirmaciones → 200  Reintento de la confirmación
+OK       … mismo folio, sin cobrar dos veces
+OK    POST /ventas/b5710b17-4251-490b-9cfb-00e90c88d199/confirmaciones → 409  Confirmar otra vez con otra clave
+OK    POST /ventas/b5710b17-4251-490b-9cfb-00e90c88d199/renglones → 409  Agregar renglón a venta confirmada
+OK    POST /ventas → 201  Abrir otra venta
+OK    POST /ventas/b6b86166-40a1-485b-9063-2aa90b11bd3a/renglones → 201  Pedir 50 leches
+OK    POST /ventas/b6b86166-40a1-485b-9063-2aa90b11bd3a/confirmaciones → 409  Existencia insuficiente
+OK       … señala producto, solicitada y disponible
+OK    GET /ventas → 200  Buscar venta por folio
+OK    GET /ventas/b5710b17-4251-490b-9cfb-00e90c88d199 → 200  Consultar venta
+OK    GET /ventas → 200  Listar ventas del día
+OK    GET /carrito → 200  Carrito vacío
+OK    POST /carrito/renglones → 201  Agregar al carrito
+OK    POST /carrito/renglones → 422  Más de lo disponible
+OK       … «Solo hay N disponibles»
+OK    POST /carrito/renglones → 422  Producto restringido
+OK       … «Producto no disponible en línea»
+OK    PATCH /carrito/renglones/01a213ee-0601-7000-91c2-fdb6284c6a1a → 200  Cambiar cantidad en el carrito
+OK    POST /carrito/renglones → 201  Agregar pan al carrito
+OK    DELETE /carrito/renglones/01a213ee-0601-7000-91c2-fdb6284c6a1a → 200  Quitar la leche del carrito
+OK    DELETE /carrito/renglones/00642c46-8f08-45a1-b190-c02ad4055faf → 404  Renglón de carrito inexistente
+OK    DELETE /carrito → 200  Vaciar carrito
+OK    POST /api/auth/register → 201  Registro (alias de la actividad)
+OK       … la respuesta no trae contraseña ni hash
+OK    POST /api/auth/register → 422  Contraseña de más de 72 bytes
+OK    POST /api/auth/login → 200  Login (alias de la actividad)
+OK       … JWT con exp explícito: 24 h para Cliente, rol y sub
+OK       … JWT de la Dueña dura 60 min
+OK    GET /api/auth/me → 200  Me (alias de la actividad)
+OK       … devuelve al usuario del token
+OK    GET /auth/yo → 200  Me (ruta del contrato)
+OK    POST /auth/sesiones → 401  Contraseña incorrecta
+OK    POST /auth/sesiones → 401  Correo inexistente
+OK       … mismo mensaje en los dos casos (no revela si el correo existe)
+OK    POST /auth/sesiones → 429  Sexto intento tras 5 fallos
+OK       … 429 con reintentaEnSegundos (RF-01-AC-5)
+OK    POST /auth/sesiones → 200  Otro correo desde la misma IP no se bloquea
+OK    GET /productos → 401  Ruta protegida sin token
+OK       … encabezado WWW-Authenticate: Bearer
+OK    GET /productos → 401  Esquema distinto a Bearer
+OK    GET /productos → 401  Token con un carácter modificado
+OK       … TOKEN_INVALIDO
+OK    GET /productos → 401  Token expirado (firma correcta)
+OK       … TOKEN_EXPIRADO
+OK    GET /productos → 401  Token firmado con otro secreto
+OK    GET /productos → 401  Token con alg none
+OK    GET /productos → 401  Empleado que se cambia el rol a DUENO en el token
+OK    GET /productos → 403  Empleado en ruta de Dueño
+OK    GET /productos/021e88b3-a80c-418d-a8b1-0b964c85bf72/costo → 403  Empleado pide el costo (RF-01-AC-3)
+OK    PATCH /configuracion → 403  Empleado cambia configuración
+OK    GET /pos/productos → 200  Empleado en ruta de tienda
+OK    POST /ventas → 403  Cliente en ruta de tienda
+OK    POST /productos → 403  Cliente crea producto
+OK    GET /carrito → 403  Dueña en el carrito (solo Cliente)
+OK    GET /carrito → 200  Cliente en su carrito
+OK    POST /usuarios → 201  Dueña crea un empleado
+OK    POST /auth/sesiones → 401  Login antes de activar
+OK    POST /usuarios/activacion → 200  Activar la cuenta
+OK    POST /usuarios/activacion → 422  Reusar el enlace
+OK    POST /auth/sesiones → 200  Login después de activar
+OK    BD   Lotes de leche: 15 recibidas, 3 vendidas, quedan 12
+OK    BD   FEFO: salió del lote que caduca primero (2030-01-10)
+OK    BD   La venta quedó COMPLETADA con folio y fecha
+OK    BD   El reintento no duplicó la recepción (3 recepciones)
+OK    BD   Movimientos: 3 de recepción y 1 de venta
+OK    BD   Auditoría escrita en la misma transacción
+OK    BD   Claves de idempotencia guardadas
+OK    BD   Configuración persistió (3 días, envío 30.00)
+OK    BD   El carrito quedó vacío
+OK    BD   Contraseñas guardadas con bcrypt ($2b$, costo 12)
+OK    BD   Ningún token de activación en claro
+OK    BD   Intentos de login registrados
+
+147/147 verificaciones correctas (113 peticiones).
+
+## 2. backend/verificar_roles.py (rol de cada ruta contra el contrato)
+
+46 operaciones; 41 protegidas, 5 públicas; diferencias con el contrato: 0
+
+## 3. S11_A1/evidencia/verificacion_complementaria.py (criterios sin caso en verificar_api.py)
+
+OK    RF-16-AC-4: estado=COMPLETADA, formaPago=TARJETA_TERMINAL, montoRecibido=None, cambio=None
+OK    RF-09-AC-3: disponible 8 -> 7 con PR 5: sin alerta
+OK    RF-09-AC-1: disponible 7 -> 5 con PR 5: alerta ['955296ea-d42b-4f19-b83b-4728b4056432']
+OK    RF-09-AC-4: disponible 5 -> 4: se actualiza la misma alerta
+OK    RF-09-AC-1 (GET /alertas): el Empleado ve la alerta: disponible 4, PR 5, sugerida 2 (PR - disponible + 1 = 2), sin proveedor
+OK    RF-09-AC-5 (GET /alertas): tras recibir 10, la alerta sale de las activas y aparece como resuelta
+OK    RF-09-AC-5: tras recibir 10: RESUELTA|14
+OK    RF-20-AC-1/AC-2 (vista previa): efectivo +20.00, tarjeta +10.00 (esperado +20.00 y +10.00)
+OK    RF-04-AC-5: {'mensaje': 'Producto no encontrado', 'productos': []}
+OK    RF-07-AC-4: venta de lote que caduca 2026-11-25: HTTP 200
+OK    RF-07-AC-3 (disponible): 4 unidades caducadas ayer, disponible = 0
+OK    RF-16-AC-6: códigos [200, 409], mensaje ['Producto agotado'], disponible final 0
+OK    RNF-06: {200: 10, 409: 40}, disponible final 0
+OK    RF-17-AC-2: precio nuevo 99.00; la venta VTA-000020 conserva 10.00 (total 10.00)
+OK    RF-08-AC-2: prInicial=-1: HTTP 422, campo prInicial
+OK    RF-08-AC-2: prInicial=2.5: HTTP 422, campo prInicial
+OK    RF-08-AC-2: prInicial='diez': HTTP 422, campo prInicial
+OK    RF-04-AC-4: sin categoría: HTTP 422, campo categoria
+
+18/18 verificaciones correctas.
+
+## 4. Frontend: npm test (Vitest)
+
+ ✓ src/pages/tienda/ProductosPage.test.tsx > pantalla de productos > sin sesión redirige al login
+ ✓ src/pages/tienda/ProductosPage.test.tsx > pantalla de productos > el Empleado no entra: regresa al dashboard sin ciclarse con el login (RF-01-AC-3)
+ ✓ src/pages/tienda/ProductosPage.test.tsx > pantalla de productos > el Dueño llega desde el dashboard y ve los productos de la API
+ ✓ src/pages/tienda/ProductosPage.test.tsx > pantalla de productos > muestra el estado vacío cuando la búsqueda no encuentra nada
+ ✓ src/pages/tienda/ProductosPage.test.tsx > pantalla de productos > valida el formulario antes de llamar a la API
+ ✓ src/pages/tienda/ProductosPage.test.tsx > pantalla de productos > da de alta un producto y aparece en la lista (RF-04-AC-1)
+ ✓ src/pages/tienda/ProductosPage.test.tsx > pantalla de productos > muestra el 409 de la API cuando el código de barras ya existe (RF-04-AC-2)
+ ✓ src/pages/tienda/ProductosPage.test.tsx > pantalla de productos > edita el precio de un producto
+ ✓ src/pages/tienda/ProductosPage.test.tsx > pantalla de productos > da de baja con confirmación y el producto sale de los activos (RF-04-AC-5)
+ ✓ src/pages/tienda/ProductosPage.test.tsx > pantalla de productos > accesibilidad: sin violaciones de axe-core con el formulario abierto
+ ✓ src/pages/tienda/flujoLogin.test.tsx > ruta protegida > sin sesión, redirige al login
+ ✓ src/pages/tienda/flujoLogin.test.tsx > ruta protegida > con la sesión vencida, redirige al login
+ ✓ src/pages/tienda/flujoLogin.test.tsx > flujo de login > inicia sesión, guarda el token y entra al dashboard protegido con datos de la API
+ ✓ src/pages/tienda/flujoLogin.test.tsx > flujo de login > después del login regresa a la página que se pidió
+ ✓ src/pages/tienda/flujoLogin.test.tsx > flujo de login > el Empleado no ve los módulos de costos ni de reorden (RF-01-AC-3)
+ ✓ src/pages/tienda/flujoLogin.test.tsx > flujo de login > con credenciales incorrectas muestra el mensaje y no guarda sesión
+ ✓ src/pages/tienda/flujoLogin.test.tsx > flujo de login > una cuenta de Cliente no entra al Portal Tienda
+ ✓ src/pages/tienda/flujoLogin.test.tsx > flujo de login > valida el formulario antes de llamar a la API
+ ✓ src/pages/tienda/flujoLogin.test.tsx > flujo de login > al salir, la ruta protegida vuelve a pedir el login
+ ✓ src/components/Navbar.test.tsx > Navbar > sin sesión oculta los enlaces privados y ofrece iniciar sesión
+ ✓ src/components/Navbar.test.tsx > Navbar > con sesión muestra enlaces privados, el usuario y Salir
+ ✓ src/components/Navbar.test.tsx > Navbar > no muestra Iniciar sesión si no hay manejador
+ ✓ src/components/Navbar.test.tsx > Navbar > accesibilidad: el botón del menú móvil tiene nombre, aria-expanded y cierra con Escape
+ ✓ src/components/ui/button.test.tsx > Button > usa la variante primaria por defecto y acepta la secundaria
+ ✓ src/components/ui/button.test.tsx > Button > en carga se desactiva, no dispara onClick y muestra loadingText
+ ✓ src/components/ui/button.test.tsx > Button > funciona con asChild y loading al mismo tiempo
+ ✓ src/components/ui/button.test.tsx > Button > accesibilidad: en carga marca aria-busy y anuncia el estado
+ ✓ src/components/ui/campo.test.tsx > Campo > asocia la etiqueta con el input
+ ✓ src/components/ui/campo.test.tsx > Campo > muestra el error en lugar de la ayuda
+ ✓ src/components/ui/campo.test.tsx > Campo > refleja el estado válido
+ ✓ src/components/ui/campo.test.tsx > Campo > accesibilidad: conecta el error al input y lo marca inválido
+ ✓ src/services/api/cliente.test.ts > URL base > se lee de VITE_API_URL (absoluta)
+ ✓ src/services/api/cliente.test.ts > URL base > acepta una ruta relativa como /api (proxy de desarrollo)
+ ✓ src/services/api/cliente.test.ts > interceptor de autenticación > agrega el JWT a las operaciones protegidas
+ ✓ src/services/api/cliente.test.ts > interceptor de autenticación > no envía el JWT al iniciar sesión
+ ✓ src/services/api/cliente.test.ts > interceptor de autenticación > descarta un token vencido sin llamar a la API
+ ✓ src/services/api/cliente.test.ts > interceptor de autenticación > envía Idempotency-Key en las operaciones que cobran
+ ✓ src/services/api/cliente.test.ts > manejo de errores centralizado > un 401 con sesión la cierra y da un mensaje claro (cuenta desactivada, RF-03-AC-2)
+ ✓ src/services/api/cliente.test.ts > manejo de errores centralizado > en el login, un 401 conserva el mensaje de la API
+ ✓ src/services/api/cliente.test.ts > manejo de errores centralizado > un 422 expone los errores por campo
+ ✓ src/services/api/cliente.test.ts > manejo de errores centralizado > un 500 no muestra detalle interno
+ ✓ src/services/api/cliente.test.ts > manejo de errores centralizado > un fallo de red se convierte en un mensaje para el usuario
+ ✓ src/services/api/cliente.test.ts > manejo de errores centralizado > el tiempo agotado tiene su propio mensaje
+ ✓ src/services/api/cliente.test.ts > manejo de errores centralizado > un 502 del proxy (backend apagado) se trata como falla de conexión
+ ✓ src/services/api/cliente.test.ts > almacenamiento del token > se guarda en sessionStorage, no en localStorage
+ ✓ src/services/cobertura.test.ts > cobertura del contrato > lee las operaciones del contrato
+ ✓ src/services/cobertura.test.ts > cobertura del contrato > cada operación tiene su función en la capa de servicios
+ ✓ src/lib/formato.test.ts > formatearDinero > muestra el monto del contrato como pesos mexicanos
+ ✓ src/lib/formato.test.ts > formatearDinero > agrega separador de miles
+ Test Files  8 passed (8)
+      Tests  49 passed (49)
